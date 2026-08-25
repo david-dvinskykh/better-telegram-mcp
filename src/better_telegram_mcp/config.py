@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     # callback data must look like. Both are optional -- unset means no filter.
     allowed_callback_senders: str | None = None
     callback_data_pattern: str | None = None
+    # Set when another process owns this bot's getUpdates stream and queues the
+    # presses as JSONL (one Bot API update per line) for this server to read.
+    callback_queue_file: Path | None = None
 
     # Runtime (derived)
     mode: Literal["bot", "user"] = "bot"

@@ -425,3 +425,16 @@ async def test_answer_text_length_capped(mock_backend):
     )
     assert "error" in result
     mock_backend.answer_callback_query.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_callbacks_does_not_reanswer_a_queued_press(mock_backend):
+    """In queue mode the poller already answered; the id is spent."""
+    queued = _callback(100)
+    queued["answered"] = True
+    mock_backend.get_callback_queries.return_value = [queued]
+
+    result = await handle_messages(mock_backend, MessagesArgs(action="callbacks"))
+
+    assert result["callbacks"][0]["answered"] is True
+    mock_backend.answer_callback_query.assert_not_awaited()

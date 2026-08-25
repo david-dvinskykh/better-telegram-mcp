@@ -161,6 +161,12 @@ IDs allowed to press a button -- a press from anyone else is logged and dropped.
 (e.g. `DEC-\d+:(yes|no|later)`). Both default to no filtering, and a per-call
 `allowed_from_ids` / `data_pattern` overrides them. See `help(topic="messages")`.
 
+`TELEGRAM_CALLBACK_QUEUE_FILE` covers the case where another process (a relay,
+a webhook receiver) already polls this bot token: Telegram allows only one
+`getUpdates` consumer per bot, so that process appends the presses to a JSONL
+file and `message(action="callbacks")` reads them from there, with the same
+cursor and guardrails.
+
 **User-mode credentials (optional overrides):** `TELEGRAM_API_ID` and
 `TELEGRAM_API_HASH` ship with built-in public dev defaults, so only
 `TELEGRAM_PHONE` is needed to start the phone + OTP flow. `TELEGRAM_SESSION_NAME`

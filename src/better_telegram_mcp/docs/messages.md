@@ -55,8 +55,8 @@ Get chat message history (user mode only).
 - **offset_id**: Start from this message ID
 
 ### callbacks
-Read inline-button presses (bot mode only). Polling based: the bot must not
-have a webhook set.
+Read inline-button presses (bot mode only). Reads Telegram's `getUpdates`
+directly, or a queue file when another process owns that stream (see below).
 - **since_id**: Only presses newer than this `update_id`
 - **limit**: Max presses per call (default 20, Bot API max 100)
 - **auto_answer**: Acknowledge each press (default true)
@@ -121,6 +121,28 @@ decision in it (e.g. `<CARD>:<yes|no|later>`).
    restart, Telegram's own delivery cursor takes over.)
 3. `edit` the message with `buttons=[]` (optionally with a new text such as
    `... — ✅ yes`) so the same question cannot be answered twice.
+
+## When another process polls this bot
+
+Telegram gives a bot exactly one `getUpdates` consumer, and the `allowed_updates`
+filter is stored per bot. So if a relay, a webhook receiver, or another bot
+framework is already polling this token, this server cannot poll it too: the two
+callers terminate each other's long polls, and whichever filter was set last
+decides which updates Telegram delivers at all.
+
+For that case, point `TELEGRAM_CALLBACK_QUEUE_FILE` at a JSONL file the polling
+process appends to — one Bot API update object per line:
+
+```json
+{"update_id": 123456790, "callback_query": {"id": "...", "from": {"id": 375465077}, "message": {"message_id": 4711, "date": 1756130591, "chat": {"id": 375465077}}, "data": "DEC-12:yes"}, "answered": true}
+```
+
+`callbacks` then reads that file instead of calling `getUpdates`; everything
+else — the cursor, the sender and pattern guardrails, the response shape — stays
+the same. The writer must poll with `allowed_updates` including
+`"callback_query"` and should answer the press itself (`answerCallbackQuery`)
+so the button stops spinning immediately; add `"answered": true` to the line and
+this server will not try to answer the spent query id again.
 
 Two guardrails can be set once, server-side, instead of on every call:
 

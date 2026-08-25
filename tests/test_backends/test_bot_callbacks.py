@@ -209,3 +209,74 @@ async def test_callback_queries_require_bot_mode(mock_user_backend):
 
     with pytest.raises(ModeError, match="requires bot mode"):
         await TelegramBackend.get_callback_queries(mock_user_backend)
+
+
+# --- queue mode: another process owns getUpdates ---
+
+
+def _queue_bot(tmp_path, lines: list[str]):
+    queue = tmp_path / "callbacks.jsonl"
+    if lines:
+        queue.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    bot, calls = _bot([], cursor_path=tmp_path / "cursor.json")
+    bot._queue_path = queue
+    return bot, calls, queue
+
+
+def _queued(update_id: int, *, answered: bool = True, data: str = "DEC-12:yes") -> str:
+    update = _callback_update(update_id, data)
+    if answered:
+        update["answered"] = True
+    return json.dumps(update, ensure_ascii=False)
+
+
+async def test_queue_mode_reads_presses_without_calling_telegram(tmp_path):
+    bot, calls, _ = _queue_bot(tmp_path, [_queued(100), _queued(101)])
+    updates = await bot.get_callback_queries()
+
+    assert [u["update_id"] for u in updates] == [100, 101]
+    assert calls == []  # no getUpdates: another process owns the stream
+
+
+async def test_queue_mode_hands_out_each_press_once(tmp_path):
+    bot, _, queue = _queue_bot(tmp_path, [_queued(100)])
+    assert len(await bot.get_callback_queries()) == 1
+    assert await bot.get_callback_queries() == []
+
+    # A press appended later is picked up; the earlier one stays consumed.
+    with queue.open("a", encoding="utf-8") as fh:
+        fh.write(_queued(102) + "\n")
+    assert [u["update_id"] for u in await bot.get_callback_queries()] == [102]
+
+
+async def test_queue_mode_cursor_survives_restart(tmp_path):
+    bot, _, queue = _queue_bot(tmp_path, [_queued(100)])
+    await bot.get_callback_queries()
+
+    restarted, _ = _bot([], cursor_path=tmp_path / "cursor.json")
+    restarted._queue_path = queue
+    assert await restarted.get_callback_queries() == []
+
+
+async def test_queue_mode_missing_file_is_an_empty_queue(tmp_path):
+    bot, _, queue = _queue_bot(tmp_path, [])
+    assert not queue.exists()
+    assert await bot.get_callback_queries() == []
+
+
+async def test_queue_mode_skips_malformed_lines(tmp_path):
+    bot, _, _ = _queue_bot(tmp_path, ["{not json", "", _queued(100)])
+    assert [u["update_id"] for u in await bot.get_callback_queries()] == [100]
+
+
+async def test_queue_mode_honours_limit_and_order(tmp_path):
+    bot, _, _ = _queue_bot(tmp_path, [_queued(102), _queued(100), _queued(101)])
+    first = await bot.get_callback_queries(limit=2)
+    assert [u["update_id"] for u in first] == [100, 101]
+    assert [u["update_id"] for u in await bot.get_callback_queries()] == [102]
+
+
+async def test_queue_mode_respects_since_id(tmp_path):
+    bot, _, _ = _queue_bot(tmp_path, [_queued(100), _queued(101)])
+    updates = await bot.get_callback_queries(since_id=100)
+    assert [u["update_id"] for u in updates] == [101]

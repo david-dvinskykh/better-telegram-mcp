@@ -167,6 +167,9 @@ def _normalize_callback(update: dict[str, Any], polled_at: str) -> dict[str, Any
         # question was posted, `received_at` when this server polled it.
         "message_date": _iso_utc(message.get("date")),
         "received_at": polled_at,
+        # True when whoever queued this press already acknowledged it (queue
+        # mode); such a callback_query_id is spent and must not be answered again.
+        "answered": bool(update.get("answered")),
     }
 
 
@@ -217,8 +220,7 @@ async def _handle_callbacks(
             ignored.append({**entry, "reason": reason})
             continue
 
-        entry["answered"] = False
-        if args.auto_answer:
+        if args.auto_answer and not entry["answered"]:
             # An unanswered query leaves a spinner on the button in every
             # client, so acknowledge before handing the press to the caller.
             try:

@@ -38,7 +38,13 @@ class TelegramAPIError(Exception):
 
 
 class BotBackend(TelegramBackend):
-    def __init__(self, bot_token: str, *, cursor_path: Path | None = None):
+    def __init__(
+        self,
+        bot_token: str,
+        *,
+        cursor_path: Path | None = None,
+        queue_path: Path | None = None,
+    ):
         super().__init__("bot")
         self._token = bot_token
         self._base_url = API_BASE.format(bot_token)
@@ -50,6 +56,10 @@ class BotBackend(TelegramBackend):
         # in memory and, when `cursor_path` is set, mirrored to disk so a
         # restart cannot re-deliver an already-processed decision.
         self._cursor_path = cursor_path
+        # When another process owns this bot's getUpdates stream (Telegram
+        # allows only one), it writes the presses to a JSONL queue and this
+        # backend reads them from there instead of polling.
+        self._queue_path = queue_path
         self._callback_offset: int | None = None
         self._cursor_loaded = False
         self._callback_lock = asyncio.Lock()
@@ -228,6 +238,9 @@ class BotBackend(TelegramBackend):
                 # since_id must not replay decisions already handed out.
                 offset = max(offset or 0, since_id + 1)
 
+            if self._queue_path is not None:
+                return await self._read_queue(offset, limit)
+
             try:
                 updates = await self._call(
                     "getUpdates",
@@ -261,6 +274,44 @@ class BotBackend(TelegramBackend):
             text=text,
             show_alert=show_alert,
         )
+
+    async def _read_queue(self, offset: int | None, limit: int) -> list[dict[str, Any]]:
+        """Read presses from the JSONL queue written by the polling process.
+
+        Each line is a Bot API update object; the writer is expected to have
+        answered the callback query already (an `answered: true` field says so).
+        The cursor is this backend's own, so a line is handed out only once.
+        """
+        try:
+            raw = await asyncio.to_thread(self._queue_path.read_text, "utf-8")
+        except FileNotFoundError:
+            # Nothing has been queued yet -- an empty queue, not an error.
+            return []
+        except OSError as e:
+            raise TelegramAPIError(
+                f"Cannot read the callback queue at {self._queue_path}: {e}"
+            ) from None
+
+        updates: list[dict[str, Any]] = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                update = json.loads(line)
+            except ValueError:
+                logger.warning("Skipping malformed line in the callback queue")
+                continue
+            update_id = update.get("update_id")
+            if not isinstance(update_id, int) or update_id < (offset or 0):
+                continue
+            updates.append(update)
+
+        updates.sort(key=lambda u: u["update_id"])
+        updates = updates[:limit]
+        if updates:
+            await self._store_cursor(updates[-1]["update_id"] + 1)
+        return [u for u in updates if u.get("callback_query")]
 
     @staticmethod
     def _webhook_hint(e: TelegramAPIError) -> TelegramAPIError:

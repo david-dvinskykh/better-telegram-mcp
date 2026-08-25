@@ -125,7 +125,11 @@ def _create_backend_instance(settings: Settings) -> TelegramBackend:
         from .backends.bot_backend import BotBackend
 
         assert settings.bot_token is not None
-        return BotBackend(settings.bot_token, cursor_path=settings.callback_cursor_path)
+        return BotBackend(
+            settings.bot_token,
+            cursor_path=settings.callback_cursor_path,
+            queue_path=settings.callback_queue_file,
+        )
     else:
         from .backends.user_backend import UserBackend
 

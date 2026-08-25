@@ -27,8 +27,11 @@ the press waits in the queue for the next `message(action="callbacks")`.
    The relay looks the session up in the resume map that
    `message(action="send", ..., resume_session="session_...")` writes, then
    runs `claude -p --cloud <session_id>` in that container to queue the press
-   into it. The container's `claude` must be signed in to a claude.ai account:
-   `--cloud` rejects API-key authentication.
+   into it. `--cloud` rejects API-key authentication, so either that container
+   is already signed in to a claude.ai account, or you set `RESUME_OAUTH_TOKEN`
+   (from `claude setup-token` on a machine where you are signed in): the relay
+   injects it for that one exec and blanks the container's own key alongside
+   it, leaving the container's normal configuration untouched.
 2. **fire** (`ROUTINE_FIRE_URL` + `ROUTINE_FIRE_TOKEN`) — POSTs a Routine's API
    trigger, which always starts a **new** session. The payload carries
    `session_id` when one is registered, so that session can hand the press on.
@@ -56,10 +59,14 @@ so turning a transport on is an edit plus a restart rather than a container
 recreate:
 
 ```sh
-RESUME_CLI_CONTAINER=some-container-with-claude-ai-login
+RESUME_CLI_CONTAINER=app_1016f397_claudecode
+RESUME_OAUTH_TOKEN=sk-ant-oat01-...
 ROUTINE_FIRE_URL=https://api.anthropic.com/v1/claude_code/routines/trig_XXXX/fire
 ROUTINE_FIRE_TOKEN=sk-ant-oat01-...
 ```
+
+`RESUME_CLI_CONTAINER` only needs a container with the `claude` CLI installed;
+with `RESUME_OAUTH_TOKEN` set it does not need its own claude.ai login.
 
 The startup log line reports what is live:
 

@@ -22,6 +22,7 @@ D=/app; S="$D/offset"; P="$D/prompt.txt"; L="$D/relay.log"; Q="$D/callbacks.json
 # plus a restart, not a container recreate.
 [ -f "$D/fire.env" ] && . "$D/fire.env"
 RESUME_CTR="${RESUME_CLI_CONTAINER:-}"
+RESUME_TOKEN="${RESUME_OAUTH_TOKEN:-}"
 FIRE_URL="${ROUTINE_FIRE_URL:-}"
 FIRE_TOKEN="${ROUTINE_FIRE_TOKEN:-}"
 FIRE_BETA="${ROUTINE_FIRE_BETA:-experimental-cc-routine-2026-04-01}"
@@ -44,11 +45,21 @@ resume_lookup(){
         'select((.chat_id|tostring) == $c and (.message_id|tostring) == $m) | .session_id' 2>/dev/null \
     | grep -E '^(session|cse)_[A-Za-z0-9]{10,48}$' | tail -n 1
 }
-# Continue that session by queueing the press into it. Needs a container whose
-# `claude` is authenticated with a claude.ai account: --cloud rejects API keys.
+# Continue that session by queueing the press into it. `--cloud` rejects API-key
+# authentication, so when the container's own `claude` is signed in that way,
+# RESUME_OAUTH_TOKEN (from `claude setup-token`) is injected for this one exec
+# and the container's key is blanked out alongside it, since a key set in the
+# environment takes precedence over an account login.
 resume(){
   [ -n "$RESUME_CTR" ] || return 1
-  printf '%s' "$2" | timeout 60 docker exec -i "$RESUME_CTR" claude -p --cloud "$1" >/dev/null 2>&1
+  if [ -n "$RESUME_TOKEN" ]; then
+    printf '%s' "$2" | timeout 60 docker exec -i \
+      -e ANTHROPIC_API_KEY= -e ANTHROPIC_AUTH_TOKEN= \
+      -e CLAUDE_CODE_OAUTH_TOKEN="$RESUME_TOKEN" \
+      "$RESUME_CTR" claude -p --cloud "$1" >/dev/null 2>&1
+  else
+    printf '%s' "$2" | timeout 60 docker exec -i "$RESUME_CTR" claude -p --cloud "$1" >/dev/null 2>&1
+  fi
 }
 # Fire the Routine API trigger with the press as its payload. Starts a NEW
 # session; the payload carries session_id so that session can hand the press on.

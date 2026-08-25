@@ -167,6 +167,11 @@ a webhook receiver) already polls this bot token: Telegram allows only one
 file and `message(action="callbacks")` reads them from there, with the same
 cursor and guardrails.
 
+`TELEGRAM_RESUME_MAP_FILE` stores which Claude session a question's buttons
+belong to (`message(action="send", ..., resume_session="session_...")`), so the
+process that delivers the press can continue that session instead of starting a
+new one; `message(action="callbacks")` echoes it back as `session_id`.
+
 **User-mode credentials (optional overrides):** `TELEGRAM_API_ID` and
 `TELEGRAM_API_HASH` ship with built-in public dev defaults, so only
 `TELEGRAM_PHONE` is needed to start the phone + OTP flow. `TELEGRAM_SESSION_NAME`

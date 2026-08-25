@@ -438,3 +438,41 @@ async def test_callbacks_does_not_reanswer_a_queued_press(mock_backend):
 
     assert result["callbacks"][0]["answered"] is True
     mock_backend.answer_callback_query.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_registers_the_asking_session(mock_backend):
+    result = await handle_messages(
+        mock_backend,
+        MessagesArgs(
+            action="send",
+            chat_id=375465077,
+            text="q",
+            buttons=_BUTTONS,
+            resume_session="session_01AbCdEfGhIjKlMn",
+        ),
+    )
+    mock_backend.record_resume_session.assert_awaited_once_with(
+        375465077, 1, "session_01AbCdEfGhIjKlMn"
+    )
+    assert result["resume_registered"] is True
+
+
+@pytest.mark.asyncio
+async def test_send_without_resume_session_registers_nothing(mock_backend):
+    result = await handle_messages(
+        mock_backend, MessagesArgs(action="send", chat_id=1, text="q")
+    )
+    mock_backend.record_resume_session.assert_not_awaited()
+    assert "resume_registered" not in result
+
+
+@pytest.mark.asyncio
+async def test_callbacks_echo_the_registered_session(mock_backend):
+    mock_backend.get_callback_queries.return_value = [_callback(100)]
+    mock_backend.lookup_resume_session.return_value = "session_01AbCdEfGhIjKlMn"
+
+    result = await handle_messages(mock_backend, MessagesArgs(action="callbacks"))
+
+    assert result["callbacks"][0]["session_id"] == "session_01AbCdEfGhIjKlMn"
+    mock_backend.lookup_resume_session.assert_awaited_once_with(42, 4711)

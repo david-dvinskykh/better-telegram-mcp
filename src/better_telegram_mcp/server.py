@@ -129,6 +129,7 @@ def _create_backend_instance(settings: Settings) -> TelegramBackend:
             settings.bot_token,
             cursor_path=settings.callback_cursor_path,
             queue_path=settings.callback_queue_file,
+            resume_map_path=settings.resume_map_file,
         )
     else:
         from .backends.user_backend import UserBackend
@@ -298,12 +299,13 @@ async def message(
     auto_answer: bool = True,
     allowed_from_ids: list[int] | None = None,
     data_pattern: str | None = None,
+    resume_session: str | None = None,
 ) -> dict[str, Any]:
     """Send, edit, delete, forward, pin, react, search, browse history, and
     ask a question with inline buttons + read the presses.
 
     Actions (chat_id: "@username" | int):
-    - send (chat_id, text -> reply_to, parse_mode, buttons)
+    - send (chat_id, text -> reply_to, parse_mode, buttons, resume_session)
     - edit (chat_id, message_id, text and/or buttons -> parse_mode)
     - delete (chat_id, message_id)
     - forward (from_chat, to_chat, message_id)
@@ -321,6 +323,11 @@ async def message(
     Each `data` is <=64 bytes, <=8 buttons per row, and comes back verbatim in
     `callbacks`. `edit` with buttons=[] strips the keyboard so a question
     cannot be answered twice.
+
+    `resume_session` (a Claude session id) on a `send` with buttons records
+    which session the question belongs to. Whoever delivers the press reads
+    that map to continue *that* session, and `callbacks` echoes it back as
+    `session_id` on each press.
 
     `callbacks` returns presses since the last read -- the server keeps the
     cursor, so a repeated call never replays a decision -- and acknowledges
@@ -357,6 +364,7 @@ async def message(
         auto_answer=auto_answer,
         allowed_from_ids=allowed_from_ids,
         data_pattern=data_pattern,
+        resume_session=resume_session,
     )
     return await handle_messages(get_backend(), args)
 

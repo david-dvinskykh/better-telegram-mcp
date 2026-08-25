@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,11 @@ logger = logging.getLogger(__name__)
 # getUpdates caps `limit` at 100 (https://core.telegram.org/bots/api#getupdates).
 MAX_UPDATES_PER_CALL = 100
 
+# Claude session ids, the only thing accepted into the resume map. The value is
+# handed to a process that resumes that session, so keep it to the exact shape.
+SESSION_ID_RE = re.compile(r"^(session|cse)_[A-Za-z0-9]{10,48}$")
+MAX_RESUME_ENTRIES = 500
+
 
 class TelegramAPIError(Exception):
     def __init__(self, description: str, error_code: int = 0):
@@ -44,6 +50,7 @@ class BotBackend(TelegramBackend):
         *,
         cursor_path: Path | None = None,
         queue_path: Path | None = None,
+        resume_map_path: Path | None = None,
     ):
         super().__init__("bot")
         self._token = bot_token
@@ -60,6 +67,9 @@ class BotBackend(TelegramBackend):
         # allows only one), it writes the presses to a JSONL queue and this
         # backend reads them from there instead of polling.
         self._queue_path = queue_path
+        # message_id -> Claude session, so whoever delivers a press can route
+        # it back into the session that asked instead of starting a new one.
+        self._resume_map_path = resume_map_path
         self._callback_offset: int | None = None
         self._cursor_loaded = False
         self._callback_lock = asyncio.Lock()
@@ -312,6 +322,67 @@ class BotBackend(TelegramBackend):
         if updates:
             await self._store_cursor(updates[-1]["update_id"] + 1)
         return [u for u in updates if u.get("callback_query")]
+
+    async def record_resume_session(
+        self, chat_id: str | int, message_id: int, session_id: str
+    ) -> bool:
+        if not SESSION_ID_RE.match(session_id or ""):
+            raise ValueError(
+                f"resume_session must be a Claude session id like "
+                f"'session_01AbCd...', got {session_id!r}"
+            )
+        if self._resume_map_path is None:
+            return False
+        entry = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "session_id": session_id,
+        }
+        await asyncio.to_thread(self._append_resume, entry)
+        return True
+
+    def _append_resume(self, entry: dict[str, Any]) -> None:
+        assert self._resume_map_path is not None
+        path = self._resume_map_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        # Keep the map bounded; only the newest registration per message wins.
+        lines = path.read_text("utf-8").splitlines()
+        if len(lines) > MAX_RESUME_ENTRIES:
+            path.write_text(
+                "\n".join(lines[-MAX_RESUME_ENTRIES:]) + "\n", encoding="utf-8"
+            )
+
+    async def lookup_resume_session(
+        self, chat_id: str | int, message_id: int
+    ) -> str | None:
+        if self._resume_map_path is None:
+            return None
+        try:
+            raw = await asyncio.to_thread(self._resume_map_path.read_text, "utf-8")
+        except FileNotFoundError:
+            return None
+        except OSError as e:
+            logger.warning("Cannot read the resume map: %s", e)
+            return None
+
+        found: str | None = None
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if str(entry.get("chat_id")) == str(chat_id) and (
+                entry.get("message_id") == message_id
+            ):
+                session_id = entry.get("session_id")
+                if isinstance(session_id, str) and SESSION_ID_RE.match(session_id):
+                    found = session_id  # last registration wins
+        return found
 
     @staticmethod
     def _webhook_hint(e: TelegramAPIError) -> TelegramAPIError:

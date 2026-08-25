@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     # Set when another process owns this bot's getUpdates stream and queues the
     # presses as JSONL (one Bot API update per line) for this server to read.
     callback_queue_file: Path | None = None
+    # Where message_id -> Claude session registrations are appended, so a press
+    # can be routed back into the session that asked the question.
+    resume_map_file: Path | None = None
 
     # Runtime (derived)
     mode: Literal["bot", "user"] = "bot"

@@ -37,6 +37,7 @@ class MessagesArgs(BaseModel):
     auto_answer: bool = True
     allowed_from_ids: list[int] | None = None
     data_pattern: str | None = None
+    resume_session: str | None = None
 
 
 async def _handle_send(backend: TelegramBackend, args: MessagesArgs) -> dict[str, Any]:
@@ -57,6 +58,17 @@ async def _handle_send(backend: TelegramBackend, args: MessagesArgs) -> dict[str
         parse_mode=args.parse_mode,
         **extra,
     )
+
+    if args.resume_session:
+        # Tie the buttons to the asking session, so the press can be delivered
+        # back into it instead of starting a fresh one.
+        message_id = result.get("message_id") if isinstance(result, dict) else None
+        if message_id is None:
+            return ok({**result, "resume_registered": False})
+        registered = await backend.record_resume_session(
+            args.chat_id, message_id, args.resume_session
+        )
+        return ok({**result, "resume_registered": registered})
     return ok(result)
 
 
@@ -237,6 +249,11 @@ async def _handle_callbacks(
                     entry["update_id"],
                     type(e).__name__,
                 )
+        # Which session asked, when the sender registered one at send time.
+        if entry["chat_id"] is not None and entry["message_id"] is not None:
+            entry["session_id"] = await backend.lookup_resume_session(
+                entry["chat_id"], entry["message_id"]
+            )
         accepted.append(entry)
 
     return ok(

@@ -70,6 +70,9 @@ Session persist: `~/.better-telegram-mcp/<name>.session`, permission 600.
   callback data must fully match)
 - `TELEGRAM_CALLBACK_QUEUE_FILE` -- optional; read presses from a JSONL queue
   written by whoever owns this bot's getUpdates stream instead of polling
+- `TELEGRAM_RESUME_MAP_FILE` -- optional; `message_id -> Claude session` map
+  written by `send(resume_session=...)`, echoed back as `session_id` on each
+  press so the asking session can be continued
 - `MCP_TRANSPORT` / `TRANSPORT_MODE` -- set to `http` to opt into HTTP mode (default wire transport is stdio); `--http` CLI flag does the same
 - `PUBLIC_URL` -- deployed hostname; presence flips on the multi-user OAuth branch (with the DCR secret + api_id/api_hash)
 - `MCP_DCR_SERVER_SECRET` -- multi-user remote OAuth shared secret (with `PUBLIC_URL`); legacy `DCR_SERVER_SECRET` still accepted

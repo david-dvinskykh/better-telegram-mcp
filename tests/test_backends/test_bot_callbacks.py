@@ -280,3 +280,55 @@ async def test_queue_mode_respects_since_id(tmp_path):
     bot, _, _ = _queue_bot(tmp_path, [_queued(100), _queued(101)])
     updates = await bot.get_callback_queries(since_id=100)
     assert [u["update_id"] for u in updates] == [101]
+
+
+# --- resume map: which session owns the buttons ---
+
+
+def _resume_bot(tmp_path):
+    bot, calls = _bot([{"message_id": 567}], cursor_path=tmp_path / "cursor.json")
+    bot._resume_map_path = tmp_path / "resume.jsonl"
+    return bot, calls
+
+
+async def test_resume_registration_round_trips(tmp_path):
+    bot, _ = _resume_bot(tmp_path)
+    assert await bot.record_resume_session(375465077, 567, "session_01AbCdEfGhIjKlMn")
+    assert await bot.lookup_resume_session(375465077, 567) == "session_01AbCdEfGhIjKlMn"
+
+
+async def test_resume_lookup_misses_are_none(tmp_path):
+    bot, _ = _resume_bot(tmp_path)
+    await bot.record_resume_session(375465077, 567, "session_01AbCdEfGhIjKlMn")
+    assert await bot.lookup_resume_session(375465077, 999) is None
+    assert await bot.lookup_resume_session(42, 567) is None
+
+
+async def test_resume_newest_registration_wins(tmp_path):
+    bot, _ = _resume_bot(tmp_path)
+    await bot.record_resume_session(375465077, 567, "session_01AbCdEfGhIjKlMn")
+    await bot.record_resume_session(375465077, 567, "session_01ZzZzZzZzZzZzZz")
+    assert await bot.lookup_resume_session(375465077, 567) == "session_01ZzZzZzZzZzZzZz"
+
+
+async def test_resume_rejects_a_non_session_id(tmp_path):
+    bot, _ = _resume_bot(tmp_path)
+    with pytest.raises(ValueError, match="Claude session id"):
+        await bot.record_resume_session(375465077, 567, "; rm -rf /")
+    assert not (tmp_path / "resume.jsonl").exists()
+
+
+async def test_resume_without_a_map_file_is_reported_not_registered():
+    bot, _ = _bot([{"message_id": 567}])
+    assert await bot.record_resume_session(1, 2, "session_01AbCdEfGhIjKlMn") is False
+    assert await bot.lookup_resume_session(1, 2) is None
+
+
+async def test_resume_map_is_capped(tmp_path):
+    bot, _ = _resume_bot(tmp_path)
+    for i in range(505):
+        await bot.record_resume_session(1, i, "session_01AbCdEfGhIjKlMn")
+    lines = (tmp_path / "resume.jsonl").read_text("utf-8").splitlines()
+    assert len(lines) == 500
+    assert await bot.lookup_resume_session(1, 0) is None  # oldest rolled off
+    assert await bot.lookup_resume_session(1, 504) == "session_01AbCdEfGhIjKlMn"

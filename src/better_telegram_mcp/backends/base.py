@@ -122,6 +122,23 @@ class TelegramBackend(ABC):
         """
         raise ModeError("bot")
 
+    async def record_resume_session(
+        self, chat_id: str | int, message_id: int, session_id: str
+    ) -> bool:
+        """Remember which Claude session owns the buttons on this message.
+
+        Whoever delivers the press (a relay, a webhook receiver) reads the map
+        to route it back to that session instead of starting a new one.
+        Returns False when no map file is configured.
+        """
+        raise ModeError("bot")
+
+    async def lookup_resume_session(
+        self, chat_id: str | int, message_id: int
+    ) -> str | None:
+        """Return the session registered for this message, newest wins."""
+        raise ModeError("bot")
+
     async def answer_callback_query(
         self,
         callback_query_id: str,

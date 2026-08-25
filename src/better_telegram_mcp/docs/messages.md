@@ -11,6 +11,7 @@ Send a new message to a chat.
 - **reply_to**: Message ID to reply to
 - **parse_mode**: "HTML" or "Markdown"
 - **buttons**: Inline callback buttons (bot mode only), see below
+- **resume_session**: Claude session id the buttons belong to, see below
 
 ### edit
 Edit an existing message.
@@ -121,6 +122,26 @@ decision in it (e.g. `<CARD>:<yes|no|later>`).
    restart, Telegram's own delivery cursor takes over.)
 3. `edit` the message with `buttons=[]` (optionally with a new text such as
    `... — ✅ yes`) so the same question cannot be answered twice.
+
+## Continuing the session that asked
+
+A press is delivered by whoever owns the bot's update stream, in a process that
+knows nothing about the session that asked the question. Pass `resume_session`
+(a Claude session id, `session_...` or `cse_...`) on the `send` that carries the
+buttons and the server records `chat_id + message_id -> session_id` in
+`TELEGRAM_RESUME_MAP_FILE`:
+
+```json
+{"action": "send", "chat_id": 375465077, "text": "DEC-12 - ...",
+ "buttons": [[{"text": "Yes", "data": "DEC-12:yes"}]],
+ "resume_session": "session_01AbCdEfGhIjKlMnOpQrStUv"}
+```
+
+The result comes back with `"resume_registered": true` (false when no map file
+is configured). Every press then carries `session_id` in the `callbacks`
+result, and the delivering process can route it into that session instead of
+starting a fresh one. Only well-formed session ids are accepted, the newest
+registration for a message wins, and the map keeps its last 500 entries.
 
 ## When another process polls this bot
 

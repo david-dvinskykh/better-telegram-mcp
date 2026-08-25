@@ -128,6 +128,8 @@ class MockBackend(TelegramBackend):
         self.edit_message_buttons = AsyncMock(return_value={"message_id": 1})
         self.get_callback_queries = AsyncMock(return_value=[])
         self.answer_callback_query = AsyncMock(return_value=True)
+        self.record_resume_session = AsyncMock(return_value=True)
+        self.lookup_resume_session = AsyncMock(return_value=None)
         self.delete_message = AsyncMock(return_value=True)
         self.forward_message = AsyncMock(return_value={"message_id": 2})
         self.pin_message = AsyncMock(return_value=True)

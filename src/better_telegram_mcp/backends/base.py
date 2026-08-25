@@ -11,6 +11,11 @@ class ModeError(Exception):
                 "This action requires user mode. "
                 "Set TELEGRAM_API_ID + TELEGRAM_API_HASH + TELEGRAM_PHONE."
             )
+        elif required_mode == "bot":
+            msg = (
+                "This action requires bot mode. Set TELEGRAM_BOT_TOKEN "
+                "(inline buttons and callback queries exist only in the Bot API)."
+            )
         else:
             msg = f"This action requires {required_mode} mode."
         super().__init__(msg)
@@ -56,6 +61,7 @@ class TelegramBackend(ABC):
         *,
         reply_to: int | None = None,
         parse_mode: str | None = None,
+        buttons: Any | None = None,
     ) -> dict[str, Any]: ...
     @abstractmethod
     async def edit_message(
@@ -65,6 +71,7 @@ class TelegramBackend(ABC):
         text: str,
         *,
         parse_mode: str | None = None,
+        buttons: Any | None = None,
     ) -> dict[str, Any]: ...
     @abstractmethod
     async def delete_message(self, chat_id: str | int, message_id: int) -> bool: ...
@@ -94,6 +101,36 @@ class TelegramBackend(ABC):
         limit: int = 20,
         offset_id: int | None = None,
     ) -> list[dict[str, Any]]: ...
+
+    # --- Inline buttons / callback queries (bot mode only) ---
+    # Concrete, not abstract: only the Bot API exposes them, so every other
+    # backend inherits the ModeError instead of restating it.
+    async def edit_message_buttons(
+        self, chat_id: str | int, message_id: int, buttons: Any | None
+    ) -> dict[str, Any]:
+        """Replace (or, with an empty ``buttons``, strip) a message's keyboard."""
+        raise ModeError("bot")
+
+    async def get_callback_queries(
+        self, *, since_id: int | None = None, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Fetch pending ``callback_query`` updates, oldest first.
+
+        Returns raw Bot API update objects. The backend owns the cursor: an
+        update handed out here is confirmed with Telegram and never returned
+        again, so a repeated call cannot replay a decision.
+        """
+        raise ModeError("bot")
+
+    async def answer_callback_query(
+        self,
+        callback_query_id: str,
+        *,
+        text: str | None = None,
+        show_alert: bool = False,
+    ) -> bool:
+        """Acknowledge a press so the client stops showing a spinner."""
+        raise ModeError("bot")
 
     # --- Chats ---
     @abstractmethod

@@ -154,6 +154,13 @@ not env vars. Server-side env vars for self-hosting:
 | `HOST` | No | `0.0.0.0` | Bind address |
 | `PORT` | No | `8080` | HTTP port |
 
+**Inline-button guardrails (bot mode, optional):**
+`TELEGRAM_ALLOWED_CALLBACK_SENDERS` is a comma-separated list of Telegram user
+IDs allowed to press a button -- a press from anyone else is logged and dropped.
+`TELEGRAM_CALLBACK_DATA_PATTERN` is a regex the callback data must fully match
+(e.g. `DEC-\d+:(yes|no|later)`). Both default to no filtering, and a per-call
+`allowed_from_ids` / `data_pattern` overrides them. See `help(topic="messages")`.
+
 **User-mode credentials (optional overrides):** `TELEGRAM_API_ID` and
 `TELEGRAM_API_HASH` ship with built-in public dev defaults, so only
 `TELEGRAM_PHONE` is needed to start the phone + OTP flow. `TELEGRAM_SESSION_NAME`
@@ -219,7 +226,7 @@ Full docs at **[mcp.n24q02m.com/servers/better-telegram-mcp/setup/](https://mcp.
 
 | Tool | Actions | Description |
 |:-----|:--------|:------------|
-| `message` | `send`, `edit`, `delete`, `forward`, `pin`, `react`, `search`, `history` | Send, edit, delete, forward messages. Pin, react, search, browse history |
+| `message` | `send`, `edit`, `delete`, `forward`, `pin`, `react`, `search`, `history`, `callbacks`, `answer` | Send, edit, delete, forward messages. Pin, react, search, browse history. Ask with inline buttons and read the presses (bot mode) |
 | `chat` | `list`, `info`, `create`, `join`, `leave`, `members`, `admin`, `settings`, `topics` | List and manage chats, groups, channels. Members, admin, forum topics |
 | `media` | `send_photo`, `send_file`, `send_voice`, `send_video`, `download` | Send photos, files, voice notes, videos. Download media from messages |
 | `contact` | `list`, `search`, `add`, `block` | List, search, add contacts. Block/unblock users (user mode only) |

@@ -54,6 +54,7 @@ class MockBackend(TelegramBackend):
         *,
         reply_to: int | None = None,
         parse_mode: str | None = None,
+        buttons: Any | None = None,
     ) -> dict[str, Any]: ...
     async def edit_message(
         self,
@@ -62,6 +63,7 @@ class MockBackend(TelegramBackend):
         text: str,
         *,
         parse_mode: str | None = None,
+        buttons: Any | None = None,
     ) -> dict[str, Any]: ...
     async def delete_message(self, chat_id: str | int, message_id: int) -> bool: ...
     async def forward_message(
@@ -123,6 +125,9 @@ class MockBackend(TelegramBackend):
         # Override with AsyncMock for call tracking
         self.send_message = AsyncMock(return_value={"message_id": 1})
         self.edit_message = AsyncMock(return_value={"message_id": 1})
+        self.edit_message_buttons = AsyncMock(return_value={"message_id": 1})
+        self.get_callback_queries = AsyncMock(return_value=[])
+        self.answer_callback_query = AsyncMock(return_value=True)
         self.delete_message = AsyncMock(return_value=True)
         self.forward_message = AsyncMock(return_value={"message_id": 2})
         self.pin_message = AsyncMock(return_value=True)

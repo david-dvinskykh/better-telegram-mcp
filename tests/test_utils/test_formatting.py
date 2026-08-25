@@ -53,7 +53,11 @@ def test_safe_error_allowed_exceptions():
             ModeError("user"),
             "This action requires user mode. Set TELEGRAM_API_ID + TELEGRAM_API_HASH + TELEGRAM_PHONE.",
         ),
-        (ModeError("bot"), "This action requires bot mode."),
+        (
+            ModeError("bot"),
+            "This action requires bot mode. Set TELEGRAM_BOT_TOKEN "
+            "(inline buttons and callback queries exist only in the Bot API).",
+        ),
         (SecurityError("Security error message"), "Security error message"),
         (ValueError("Value error message"), "Value error message"),
         (FileNotFoundError("File not found message"), "File not found message"),

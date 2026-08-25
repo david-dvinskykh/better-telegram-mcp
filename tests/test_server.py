@@ -1216,3 +1216,62 @@ async def test_run_http():
         assert args[0] is mcp
         assert kwargs["server_name"] == "better-telegram-mcp"
         assert kwargs["port"] == 8080
+
+
+@pytest.mark.asyncio
+async def test_message_send_with_buttons(mock_backend):
+    """The message tool forwards inline buttons to the backend."""
+    import better_telegram_mcp.server as srv
+    from better_telegram_mcp.server import message
+
+    buttons = [[{"text": "Yes", "data": "DEC-12:yes"}]]
+    old_backend, old_pending = srv._backend, srv._pending_auth
+    try:
+        srv._backend = mock_backend
+        srv._pending_auth = False
+        payload(await message(action="send", chat_id=123, text="q", buttons=buttons))
+        mock_backend.send_message.assert_awaited_once_with(
+            123, "q", reply_to=None, parse_mode=None, buttons=buttons
+        )
+    finally:
+        srv._backend, srv._pending_auth = old_backend, old_pending
+
+
+@pytest.mark.asyncio
+async def test_callbacks_apply_configured_guardrails(mock_backend):
+    """Env-configured sender/data filters apply without per-call arguments."""
+    import better_telegram_mcp.server as srv
+    from better_telegram_mcp.config import Settings
+    from better_telegram_mcp.server import message
+
+    mock_backend.get_callback_queries.return_value = [
+        {
+            "update_id": 100,
+            "callback_query": {
+                "id": "cbq-100",
+                "from": {"id": 999},
+                "message": {"message_id": 1, "date": 1756130591, "chat": {"id": 1}},
+                "data": "DEC-12:yes",
+            },
+        }
+    ]
+    old_backend, old_pending, old_settings = (
+        srv._backend,
+        srv._pending_auth,
+        srv._settings,
+    )
+    try:
+        srv._backend = mock_backend
+        srv._pending_auth = False
+        srv._settings = Settings(
+            bot_token="123:ABC",
+            allowed_callback_senders="375465077",
+            callback_data_pattern=r"DEC-\d+:(yes|no|later)",
+        )
+        result = payload(await message(action="callbacks"))
+        assert result["count"] == 0
+        assert result["ignored"][0]["reason"] == "unauthorized_sender"
+        mock_backend.answer_callback_query.assert_not_awaited()
+    finally:
+        srv._backend, srv._pending_auth = old_backend, old_pending
+        srv._settings = old_settings

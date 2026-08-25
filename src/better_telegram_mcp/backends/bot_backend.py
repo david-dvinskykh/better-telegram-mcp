@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -9,6 +11,7 @@ import httpx
 
 from ..relay_setup import redact_bot_token
 from .base import TelegramBackend
+from .inline_keyboard import build_inline_keyboard
 from .security import (
     SecurityError,
     fetch_url_safely,
@@ -18,6 +21,11 @@ from .security import (
 
 API_BASE = "https://api.telegram.org/bot{}/"
 FILE_API_BASE = "https://api.telegram.org/file/bot{}/"
+
+logger = logging.getLogger(__name__)
+
+# getUpdates caps `limit` at 100 (https://core.telegram.org/bots/api#getupdates).
+MAX_UPDATES_PER_CALL = 100
 
 
 class TelegramAPIError(Exception):
@@ -30,7 +38,7 @@ class TelegramAPIError(Exception):
 
 
 class BotBackend(TelegramBackend):
-    def __init__(self, bot_token: str):
+    def __init__(self, bot_token: str, *, cursor_path: Path | None = None):
         super().__init__("bot")
         self._token = bot_token
         self._base_url = API_BASE.format(bot_token)
@@ -38,6 +46,13 @@ class BotBackend(TelegramBackend):
         self._client = httpx.AsyncClient(base_url=self._base_url, timeout=30.0)
         self._connected = False
         self._bot_info: dict[str, Any] = {}
+        # Callback-query cursor: the update_id the next poll starts from. Held
+        # in memory and, when `cursor_path` is set, mirrored to disk so a
+        # restart cannot re-deliver an already-processed decision.
+        self._cursor_path = cursor_path
+        self._callback_offset: int | None = None
+        self._cursor_loaded = False
+        self._callback_lock = asyncio.Lock()
 
     async def _call(self, method: str, **params: Any) -> Any:
         data = {k: v for k, v in params.items() if v is not None}
@@ -109,6 +124,7 @@ class BotBackend(TelegramBackend):
         *,
         reply_to: int | None = None,
         parse_mode: str | None = None,
+        buttons: Any | None = None,
     ) -> dict[str, Any]:
         return await self._call(
             "sendMessage",
@@ -116,6 +132,9 @@ class BotBackend(TelegramBackend):
             text=text,
             reply_to_message_id=reply_to,
             parse_mode=parse_mode,
+            reply_markup=(
+                build_inline_keyboard(buttons) if buttons is not None else None
+            ),
         )
 
     async def edit_message(
@@ -125,6 +144,7 @@ class BotBackend(TelegramBackend):
         text: str,
         *,
         parse_mode: str | None = None,
+        buttons: Any | None = None,
     ) -> dict[str, Any]:
         return await self._call(
             "editMessageText",
@@ -132,6 +152,9 @@ class BotBackend(TelegramBackend):
             message_id=message_id,
             text=text,
             parse_mode=parse_mode,
+            reply_markup=(
+                build_inline_keyboard(buttons) if buttons is not None else None
+            ),
         )
 
     async def delete_message(self, chat_id: str | int, message_id: int) -> bool:
@@ -179,6 +202,130 @@ class BotBackend(TelegramBackend):
         offset_id: int | None = None,
     ) -> list[dict[str, Any]]:
         return []  # Bot API cannot read arbitrary chat history
+
+    # --- Inline buttons / callback queries ---
+    async def edit_message_buttons(
+        self, chat_id: str | int, message_id: int, buttons: Any | None
+    ) -> dict[str, Any]:
+        return await self._call(
+            "editMessageReplyMarkup",
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup=build_inline_keyboard(buttons if buttons is not None else []),
+        )
+
+    async def get_callback_queries(
+        self, *, since_id: int | None = None, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(limit, MAX_UPDATES_PER_CALL))
+        # One poll at a time per backend: two concurrent getUpdates calls would
+        # hand the same press to both callers (and Telegram rejects them anyway).
+        async with self._callback_lock:
+            await self._load_cursor()
+            offset = self._callback_offset
+            if since_id is not None:
+                # A caller-supplied cursor may only move forward: an older
+                # since_id must not replay decisions already handed out.
+                offset = max(offset or 0, since_id + 1)
+
+            try:
+                updates = await self._call(
+                    "getUpdates",
+                    offset=offset,
+                    limit=limit,
+                    allowed_updates=["callback_query"],
+                    timeout=0,
+                )
+            except TelegramAPIError as e:
+                raise self._webhook_hint(e) from None
+
+            updates = updates or []
+            if not updates:
+                return []
+
+            highest = max(u.get("update_id", -1) for u in updates)
+            if highest >= 0:
+                await self._confirm_updates(highest + 1)
+            return [u for u in updates if u.get("callback_query")]
+
+    async def answer_callback_query(
+        self,
+        callback_query_id: str,
+        *,
+        text: str | None = None,
+        show_alert: bool = False,
+    ) -> bool:
+        return await self._call(
+            "answerCallbackQuery",
+            callback_query_id=callback_query_id,
+            text=text,
+            show_alert=show_alert,
+        )
+
+    @staticmethod
+    def _webhook_hint(e: TelegramAPIError) -> TelegramAPIError:
+        """Turn the getUpdates/webhook conflict into an actionable message."""
+        if "webhook" in str(e).lower():
+            return TelegramAPIError(
+                "Cannot read callback queries while a webhook is active: "
+                f"{e}. Delete the webhook (Bot API deleteWebhook) so this "
+                "server can poll getUpdates, or have the webhook receiver "
+                "queue callback_query updates itself.",
+                e.error_code,
+            )
+        return e
+
+    async def _confirm_updates(self, next_offset: int) -> None:
+        """Persist the cursor, then tell Telegram to drop the confirmed updates.
+
+        The local cursor is written first: if the confirming call fails, the
+        already-returned presses are still filtered out on the next poll.
+        """
+        await self._store_cursor(next_offset)
+        try:
+            await self._call(
+                "getUpdates",
+                offset=next_offset,
+                limit=1,
+                allowed_updates=["callback_query"],
+                timeout=0,
+            )
+        except TelegramAPIError as e:
+            logger.debug("Failed to confirm callback offset %s: %s", next_offset, e)
+
+    async def _load_cursor(self) -> None:
+        if self._cursor_loaded:
+            return
+        self._cursor_loaded = True
+        if self._cursor_path is None:
+            return
+        try:
+            raw = await asyncio.to_thread(self._cursor_path.read_text, "utf-8")
+            offset = json.loads(raw).get("offset")
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError, AttributeError) as e:
+            logger.warning("Ignoring unreadable callback cursor file: %s", e)
+            return
+        if isinstance(offset, int):
+            self._callback_offset = offset
+
+    async def _store_cursor(self, offset: int) -> None:
+        self._callback_offset = offset
+        if self._cursor_path is None:
+            return
+        try:
+            await asyncio.to_thread(self._write_cursor, offset)
+        except OSError as e:
+            logger.warning("Failed to persist callback cursor: %s", e)
+
+    def _write_cursor(self, offset: int) -> None:
+        assert self._cursor_path is not None
+        self._cursor_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._cursor_path.with_suffix(self._cursor_path.suffix + ".tmp")
+        tmp.write_text(json.dumps({"offset": offset}), encoding="utf-8")
+        tmp.chmod(0o600)
+        tmp.replace(self._cursor_path)
 
     # --- Chats ---
     async def list_chats(self, *, limit: int = 50) -> list[dict[str, Any]]:

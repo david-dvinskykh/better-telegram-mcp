@@ -125,7 +125,7 @@ def _create_backend_instance(settings: Settings) -> TelegramBackend:
         from .backends.bot_backend import BotBackend
 
         assert settings.bot_token is not None
-        return BotBackend(settings.bot_token)
+        return BotBackend(settings.bot_token, cursor_path=settings.callback_cursor_path)
     else:
         from .backends.user_backend import UserBackend
 
@@ -286,21 +286,51 @@ async def message(
     query: str | None = None,
     limit: int = 20,
     offset_id: int | None = None,
+    buttons: list[list[dict[str, str]]] | None = None,
+    since_id: int | None = None,
+    callback_query_id: str | None = None,
+    answer_text: str | None = None,
+    show_alert: bool = False,
+    auto_answer: bool = True,
+    allowed_from_ids: list[int] | None = None,
+    data_pattern: str | None = None,
 ) -> dict[str, Any]:
-    """Send, edit, delete, forward, pin, react, search, and get message history.
+    """Send, edit, delete, forward, pin, react, search, browse history, and
+    ask a question with inline buttons + read the presses.
 
     Actions (chat_id: "@username" | int):
-    - send (chat_id, text -> reply_to, parse_mode)
-    - edit (chat_id, message_id, text -> parse_mode)
+    - send (chat_id, text -> reply_to, parse_mode, buttons)
+    - edit (chat_id, message_id, text and/or buttons -> parse_mode)
     - delete (chat_id, message_id)
     - forward (from_chat, to_chat, message_id)
     - pin (chat_id, message_id)
     - react (chat_id, message_id, emoji)
     - search (query -> chat_id, limit=20)
     - history (chat_id -> limit=20, offset_id)
+    - callbacks (-> since_id, limit=20, auto_answer, answer_text,
+      allowed_from_ids, data_pattern)  [bot mode]
+    - answer (callback_query_id -> answer_text, show_alert)  [bot mode]
+
+    Inline buttons (bot mode only) are rows of callback buttons:
+    buttons=[[{"text": "Yes", "data": "DEC-12:yes"},
+              {"text": "No", "data": "DEC-12:no"}]]
+    Each `data` is <=64 bytes, <=8 buttons per row, and comes back verbatim in
+    `callbacks`. `edit` with buttons=[] strips the keyboard so a question
+    cannot be answered twice.
+
+    `callbacks` returns presses since the last read -- the server keeps the
+    cursor, so a repeated call never replays a decision -- and acknowledges
+    each one (answerCallbackQuery) unless auto_answer=False.
     """
     if _unconfigured or _pending_auth:
         return _not_ready_response()
+
+    if action == "callbacks" and _settings is not None:
+        # Operator-configured guardrails apply unless the call overrides them.
+        if allowed_from_ids is None:
+            allowed_from_ids = _settings.allowed_callback_sender_ids or None
+        if data_pattern is None:
+            data_pattern = _settings.callback_data_pattern
 
     args = MessagesArgs(
         action=action,
@@ -315,6 +345,14 @@ async def message(
         query=query,
         limit=limit,
         offset_id=offset_id,
+        buttons=buttons,
+        since_id=since_id,
+        callback_query_id=callback_query_id,
+        answer_text=answer_text,
+        show_alert=show_alert,
+        auto_answer=auto_answer,
+        allowed_from_ids=allowed_from_ids,
+        data_pattern=data_pattern,
     )
     return await handle_messages(get_backend(), args)
 

@@ -60,6 +60,10 @@ class Settings(BaseSettings):
 
     # Security
     trusted_proxies: str | None = None
+    # Callback queries (bot mode): who may press a button, and what the
+    # callback data must look like. Both are optional -- unset means no filter.
+    allowed_callback_senders: str | None = None
+    callback_data_pattern: str | None = None
 
     # Runtime (derived)
     mode: Literal["bot", "user"] = "bot"
@@ -72,6 +76,29 @@ class Settings(BaseSettings):
         return frozenset(
             p.strip() for p in self.trusted_proxies.split(",") if p.strip()
         )
+
+    @functools.cached_property
+    def allowed_callback_sender_ids(self) -> list[int]:
+        """Parse TELEGRAM_ALLOWED_CALLBACK_SENDERS ("123,456") into user IDs.
+
+        Empty list = accept a press from anyone the bot can reach.
+        """
+        if not self.allowed_callback_senders:
+            return []
+        ids: list[int] = []
+        for part in self.allowed_callback_senders.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                ids.append(int(part))
+            except ValueError:
+                msg = (
+                    "TELEGRAM_ALLOWED_CALLBACK_SENDERS must be a comma-separated "
+                    f"list of numeric Telegram user IDs, got {part!r}"
+                )
+                raise ValueError(msg) from None
+        return ids
 
     @model_validator(mode="after")
     def _detect_mode(self) -> Settings:
@@ -134,6 +161,11 @@ class Settings(BaseSettings):
     @property
     def session_path(self) -> Path:
         return self.data_dir / f"{self.session_name}.session"
+
+    @property
+    def callback_cursor_path(self) -> Path:
+        """Where the last processed callback update_id is persisted."""
+        return self.data_dir / f"{self.session_name}.callbacks.json"
 
     @cached_property
     def secret(self) -> str:

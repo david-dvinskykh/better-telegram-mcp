@@ -231,3 +231,26 @@ def test_from_relay_config():
     s2 = Settings.from_relay_config({})
     assert s2.api_id == 37984984
     assert s2.api_hash == "2f5f4c76c4de7c07302380c788390100"
+
+
+def test_allowed_callback_senders_parsed(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_ALLOWED_CALLBACK_SENDERS", "375465077, 42 ,")
+    assert Settings().allowed_callback_sender_ids == [375465077, 42]
+
+
+def test_allowed_callback_senders_unset_means_no_filter(monkeypatch):
+    monkeypatch.delenv("TELEGRAM_ALLOWED_CALLBACK_SENDERS", raising=False)
+    assert Settings().allowed_callback_sender_ids == []
+
+
+def test_allowed_callback_senders_rejects_non_numeric(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_ALLOWED_CALLBACK_SENDERS", "@owner")
+    with pytest.raises(ValueError, match="numeric Telegram user IDs"):
+        _ = Settings().allowed_callback_sender_ids
+
+
+def test_callback_cursor_path_next_to_session(monkeypatch, tmp_path):
+    monkeypatch.setenv("TELEGRAM_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("TELEGRAM_SESSION_NAME", "work")
+    s = Settings()
+    assert s.callback_cursor_path == tmp_path / "work.callbacks.json"

@@ -27,6 +27,7 @@ src/better_telegram_mcp/
     in_memory_session_store.py # bearer/sub -> SessionInfo (RAM only)
   backends/            # TelegramBackend ABC -> BotBackend (httpx), UserBackend (Telethon)
   backends/security.py # validate_url, validate_file_path, validate_output_dir
+  backends/inline_keyboard.py  # buttons -> InlineKeyboardMarkup, Bot API limits
   relay_setup.py       # Shared error sanitization, field constants
   relay_schema.py      # Relay schema + TELEGRAM_TABS layout + render_telegram_form
                        # (Bot/User tabs drawn by mcp-core render_credential_form)
@@ -64,6 +65,9 @@ Session persist: `~/.better-telegram-mcp/<name>.session`, permission 600.
 - `TELEGRAM_API_ID` + `TELEGRAM_API_HASH` -- user mode (built-in defaults, override optional)
 - `TELEGRAM_PHONE` -- phone for local auth or the HTTP relay form
 - `TELEGRAM_SESSION_NAME`, `TELEGRAM_DATA_DIR` -- optional
+- `TELEGRAM_ALLOWED_CALLBACK_SENDERS`, `TELEGRAM_CALLBACK_DATA_PATTERN` -- optional
+  guardrails for `message(action="callbacks")` (allowed presser IDs; regex the
+  callback data must fully match)
 - `MCP_TRANSPORT` / `TRANSPORT_MODE` -- set to `http` to opt into HTTP mode (default wire transport is stdio); `--http` CLI flag does the same
 - `PUBLIC_URL` -- deployed hostname; presence flips on the multi-user OAuth branch (with the DCR secret + api_id/api_hash)
 - `MCP_DCR_SERVER_SECRET` -- multi-user remote OAuth shared secret (with `PUBLIC_URL`); legacy `DCR_SERVER_SECRET` still accepted

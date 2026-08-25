@@ -15,7 +15,7 @@ from telethon.tl.functions.contacts import (
 from telethon.tl.types import Channel, Chat, InputPhoneContact, User
 
 from ..config import Settings
-from .base import TelegramBackend
+from .base import ModeError, TelegramBackend
 from .security import (
     fetch_url_safely,
     validate_file_path,
@@ -278,7 +278,12 @@ class UserBackend(TelegramBackend):
         *,
         reply_to: int | None = None,
         parse_mode: str | None = None,
+        buttons: Any | None = None,
     ) -> dict[str, Any]:
+        if buttons:
+            # Inline keyboards are a bot-only feature of the MTProto API; a
+            # user account cannot attach one to its own message.
+            raise ModeError("bot")
         client = self._ensure_client()
         msg = await client.send_message(
             chat_id, text, reply_to=reply_to, parse_mode=parse_mode
@@ -292,7 +297,10 @@ class UserBackend(TelegramBackend):
         text: str,
         *,
         parse_mode: str | None = None,
+        buttons: Any | None = None,
     ) -> dict[str, Any]:
+        if buttons:
+            raise ModeError("bot")
         client = self._ensure_client()
         msg = await client.edit_message(
             chat_id, message_id, text, parse_mode=parse_mode

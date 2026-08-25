@@ -1,10 +1,18 @@
+import logging
+import re
 from collections.abc import Callable, Coroutine
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel
 
 from ..backends.base import ModeError, TelegramBackend
 from ..utils.formatting import err, ok, safe_error
+
+logger = logging.getLogger(__name__)
+
+# answerCallbackQuery notification text is capped at 200 characters.
+MAX_ANSWER_TEXT = 200
 
 
 class MessagesArgs(BaseModel):
@@ -20,6 +28,15 @@ class MessagesArgs(BaseModel):
     query: str | None = None
     limit: int = 20
     offset_id: int | None = None
+    # Inline buttons + callback queries (bot mode)
+    buttons: list[Any] | None = None
+    since_id: int | None = None
+    callback_query_id: str | None = None
+    answer_text: str | None = None
+    show_alert: bool = False
+    auto_answer: bool = True
+    allowed_from_ids: list[int] | None = None
+    data_pattern: str | None = None
 
 
 async def _handle_send(backend: TelegramBackend, args: MessagesArgs) -> dict[str, Any]:
@@ -27,25 +44,45 @@ async def _handle_send(backend: TelegramBackend, args: MessagesArgs) -> dict[str
         return err(
             "'send' requires chat_id and text. "
             "chat_id: positive int (user), negative int (group), or @username. "
-            "Optional parse_mode: HTML, MarkdownV2, or Markdown."
+            "Optional parse_mode: HTML, MarkdownV2, or Markdown. "
+            'Optional buttons: [[{"text": "Yes", "data": "DEC-12:yes"}]].'
         )
+    # Keep the no-buttons call shape untouched so backends that predate inline
+    # keyboards (and every existing caller) behave exactly as before.
+    extra: dict[str, Any] = {} if args.buttons is None else {"buttons": args.buttons}
     result = await backend.send_message(
         args.chat_id,
         args.text,
         reply_to=args.reply_to,
         parse_mode=args.parse_mode,
+        **extra,
     )
     return ok(result)
 
 
 async def _handle_edit(backend: TelegramBackend, args: MessagesArgs) -> dict[str, Any]:
-    if not args.chat_id or args.message_id is None or not args.text:
+    if (
+        not args.chat_id
+        or args.message_id is None
+        or not (args.text or args.buttons is not None)
+    ):
         return err(
-            "'edit' requires chat_id, message_id, and text. "
-            "Optional parse_mode: HTML, MarkdownV2, or Markdown."
+            "'edit' requires chat_id, message_id, and text and/or buttons. "
+            "Optional parse_mode: HTML, MarkdownV2, or Markdown. "
+            "buttons=[] strips the inline keyboard from the message."
         )
+    if not args.text:
+        result = await backend.edit_message_buttons(
+            args.chat_id, args.message_id, args.buttons
+        )
+        return ok(result)
+    extra: dict[str, Any] = {} if args.buttons is None else {"buttons": args.buttons}
     result = await backend.edit_message(
-        args.chat_id, args.message_id, args.text, parse_mode=args.parse_mode
+        args.chat_id,
+        args.message_id,
+        args.text,
+        parse_mode=args.parse_mode,
+        **extra,
     )
     return ok(result)
 
@@ -106,6 +143,130 @@ async def _handle_history(
     return ok({"messages": results, "count": len(results)})
 
 
+def _iso_utc(timestamp: Any) -> str | None:
+    """Format a Bot API unix timestamp as an ISO-8601 UTC string."""
+    if not isinstance(timestamp, (int, float)):
+        return None
+    return datetime.fromtimestamp(timestamp, UTC).isoformat().replace("+00:00", "Z")
+
+
+def _normalize_callback(update: dict[str, Any], polled_at: str) -> dict[str, Any]:
+    query = update.get("callback_query") or {}
+    sender = query.get("from") or {}
+    message = query.get("message") or {}
+    chat = message.get("chat") or {}
+    return {
+        "update_id": update.get("update_id"),
+        "callback_query_id": query.get("id"),
+        "data": query.get("data"),
+        "from_id": sender.get("id"),
+        "from_username": sender.get("username"),
+        "chat_id": chat.get("id"),
+        "message_id": message.get("message_id"),
+        # The Bot API carries no press timestamp; `message_date` is when the
+        # question was posted, `received_at` when this server polled it.
+        "message_date": _iso_utc(message.get("date")),
+        "received_at": polled_at,
+    }
+
+
+async def _handle_callbacks(
+    backend: TelegramBackend, args: MessagesArgs
+) -> dict[str, Any]:
+    """Read inline-button presses (bot mode) and acknowledge them."""
+    if args.answer_text and len(args.answer_text) > MAX_ANSWER_TEXT:
+        return err(f"answer_text exceeds {MAX_ANSWER_TEXT} characters")
+
+    if args.data_pattern:
+        try:
+            pattern = re.compile(args.data_pattern)
+        except re.error as e:
+            return err(f"Invalid data_pattern regex: {e}")
+    else:
+        pattern = None
+
+    allowed = set(args.allowed_from_ids or ())
+    updates = await backend.get_callback_queries(
+        since_id=args.since_id, limit=args.limit
+    )
+    polled_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+    accepted: list[dict[str, Any]] = []
+    ignored: list[dict[str, Any]] = []
+    cursor = args.since_id
+    for update in updates:
+        entry = _normalize_callback(update, polled_at)
+        if isinstance(entry["update_id"], int):
+            cursor = max(cursor or 0, entry["update_id"])
+
+        reason = None
+        if not entry["callback_query_id"] or not isinstance(entry["data"], str):
+            reason = "malformed"
+        elif allowed and entry["from_id"] not in allowed:
+            reason = "unauthorized_sender"
+        elif pattern is not None and not pattern.fullmatch(entry["data"]):
+            reason = "data_pattern_mismatch"
+
+        if reason:
+            logger.warning(
+                "Ignoring callback_query %s from user %s: %s",
+                entry["update_id"],
+                entry["from_id"],
+                reason,
+            )
+            ignored.append({**entry, "reason": reason})
+            continue
+
+        entry["answered"] = False
+        if args.auto_answer:
+            # An unanswered query leaves a spinner on the button in every
+            # client, so acknowledge before handing the press to the caller.
+            try:
+                await backend.answer_callback_query(
+                    entry["callback_query_id"],
+                    text=(args.answer_text or None),
+                    show_alert=args.show_alert,
+                )
+                entry["answered"] = True
+            except Exception as e:
+                # A stale query id must not swallow the decision itself.
+                logger.warning(
+                    "answerCallbackQuery failed for %s: %s",
+                    entry["update_id"],
+                    type(e).__name__,
+                )
+        accepted.append(entry)
+
+    return ok(
+        {
+            "callbacks": accepted,
+            "count": len(accepted),
+            "ignored": ignored,
+            "ignored_count": len(ignored),
+            # Pass this back as since_id on the next call; the server keeps the
+            # same cursor itself, so a repeated call never replays a press.
+            "cursor": cursor,
+        }
+    )
+
+
+async def _handle_answer(
+    backend: TelegramBackend, args: MessagesArgs
+) -> dict[str, Any]:
+    if not args.callback_query_id:
+        return err(
+            "'answer' requires callback_query_id (from a 'callbacks' result). "
+            "Optional answer_text (<=200 chars) and show_alert."
+        )
+    text = args.answer_text
+    if text and len(text) > MAX_ANSWER_TEXT:
+        return err(f"answer_text exceeds {MAX_ANSWER_TEXT} characters")
+    result = await backend.answer_callback_query(
+        args.callback_query_id, text=text, show_alert=args.show_alert
+    )
+    return ok({"answered": bool(result)})
+
+
 _ACTION_HANDLERS: dict[
     str, Callable[[TelegramBackend, MessagesArgs], Coroutine[Any, Any, dict[str, Any]]]
 ] = {
@@ -117,6 +278,8 @@ _ACTION_HANDLERS: dict[
     "react": _handle_react,
     "search": _handle_search,
     "history": _handle_history,
+    "callbacks": _handle_callbacks,
+    "answer": _handle_answer,
 }
 
 

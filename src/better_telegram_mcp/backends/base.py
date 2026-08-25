@@ -112,13 +112,15 @@ class TelegramBackend(ABC):
         raise ModeError("bot")
 
     async def get_callback_queries(
-        self, *, since_id: int | None = None, limit: int = 50
+        self, *, since_id: int | None = None, limit: int = 50, consume: bool = True
     ) -> list[dict[str, Any]]:
         """Fetch pending ``callback_query`` updates, oldest first.
 
         Returns raw Bot API update objects. The backend owns the cursor: an
         update handed out here is confirmed with Telegram and never returned
-        again, so a repeated call cannot replay a decision.
+        again, so a repeated call cannot replay a decision. ``consume=False``
+        leaves the cursor alone, so a watcher can look without taking the
+        press away from whoever acts on it.
         """
         raise ModeError("bot")
 

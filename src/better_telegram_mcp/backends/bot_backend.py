@@ -235,8 +235,13 @@ class BotBackend(TelegramBackend):
         )
 
     async def get_callback_queries(
-        self, *, since_id: int | None = None, limit: int = 50
+        self, *, since_id: int | None = None, limit: int = 50, consume: bool = True
     ) -> list[dict[str, Any]]:
+        """Return pending presses; with consume=False, leave them pending.
+
+        A non-consuming read is what a watcher wants: it can look as often as
+        it likes without taking the press away from whoever acts on it.
+        """
         limit = max(1, min(limit, MAX_UPDATES_PER_CALL))
         # One poll at a time per backend: two concurrent getUpdates calls would
         # hand the same press to both callers (and Telegram rejects them anyway).
@@ -249,7 +254,7 @@ class BotBackend(TelegramBackend):
                 offset = max(offset or 0, since_id + 1)
 
             if self._queue_path is not None:
-                return await self._read_queue(offset, limit)
+                return await self._read_queue(offset, limit, consume=consume)
 
             try:
                 updates = await self._call(
@@ -266,8 +271,10 @@ class BotBackend(TelegramBackend):
             if not updates:
                 return []
 
+            # Telegram drops an update only once a higher offset is confirmed,
+            # so skipping that call is exactly what makes this read a peek.
             highest = max(u.get("update_id", -1) for u in updates)
-            if highest >= 0:
+            if consume and highest >= 0:
                 await self._confirm_updates(highest + 1)
             return [u for u in updates if u.get("callback_query")]
 
@@ -285,7 +292,9 @@ class BotBackend(TelegramBackend):
             show_alert=show_alert,
         )
 
-    async def _read_queue(self, offset: int | None, limit: int) -> list[dict[str, Any]]:
+    async def _read_queue(
+        self, offset: int | None, limit: int, *, consume: bool = True
+    ) -> list[dict[str, Any]]:
         """Read presses from the JSONL queue written by the polling process.
 
         Each line is a Bot API update object; the writer is expected to have
@@ -319,7 +328,7 @@ class BotBackend(TelegramBackend):
 
         updates.sort(key=lambda u: u["update_id"])
         updates = updates[:limit]
-        if updates:
+        if updates and consume:
             await self._store_cursor(updates[-1]["update_id"] + 1)
         return [u for u in updates if u.get("callback_query")]
 

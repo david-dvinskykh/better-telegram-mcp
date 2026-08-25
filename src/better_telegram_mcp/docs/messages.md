@@ -64,6 +64,10 @@ directly, or a queue file when another process owns that stream (see below).
 - **answer_text**: Toast shown on the presser's screen (max 200 chars)
 - **allowed_from_ids**: Only accept presses from these user IDs
 - **data_pattern**: Regex the callback data must fully match
+- **peek**: Read without consuming - the presses stay pending and nothing is
+  answered. This is what a watcher polls.
+- **message_id**: With `peek`, watch one question only. Refused without `peek`,
+  since a filtered consuming read would drop every other press.
 
 Returns:
 ```json
@@ -122,6 +126,23 @@ decision in it (e.g. `<CARD>:<yes|no|later>`).
    restart, Telegram's own delivery cursor takes over.)
 3. `edit` the message with `buttons=[]` (optionally with a new text such as
    `... — ✅ yes`) so the same question cannot be answered twice.
+
+## Watching for a press from a session
+
+A session that asked a question can wait for the answer instead of being told
+about it later. Both ways below read with `peek`, so the press stays pending
+for whoever acts on it and is answered by nobody:
+
+- **Poll from a watcher**: a background monitor calls
+  `callbacks` with `peek=true` and the question's `message_id` every few
+  seconds and reports the first non-empty result. Latency is the poll interval.
+- **Self-scheduled wake-up**: the session schedules a check-in and peeks on
+  each wake. No watcher and no network reach into the queue's host, but the
+  granularity is whatever the scheduler allows.
+
+Either way, once the press shows up, the session does the real read
+(`callbacks` without `peek`, which consumes it), acts, and strips the keyboard
+with `edit(buttons=[])`.
 
 ## Continuing the session that asked
 

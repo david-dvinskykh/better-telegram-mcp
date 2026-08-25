@@ -38,6 +38,7 @@ class MessagesArgs(BaseModel):
     allowed_from_ids: list[int] | None = None
     data_pattern: str | None = None
     resume_session: str | None = None
+    peek: bool = False
 
 
 async def _handle_send(backend: TelegramBackend, args: MessagesArgs) -> dict[str, Any]:
@@ -200,9 +201,16 @@ async def _handle_callbacks(
     else:
         pattern = None
 
+    if args.message_id is not None and not args.peek:
+        return err(
+            "'callbacks' with message_id only makes sense together with "
+            "peek=true: a filtered consuming read would drop every other "
+            "press instead of leaving it for whoever acts on it."
+        )
+
     allowed = set(args.allowed_from_ids or ())
     updates = await backend.get_callback_queries(
-        since_id=args.since_id, limit=args.limit
+        since_id=args.since_id, limit=args.limit, consume=not args.peek
     )
     polled_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -213,6 +221,10 @@ async def _handle_callbacks(
         entry = _normalize_callback(update, polled_at)
         if isinstance(entry["update_id"], int):
             cursor = max(cursor or 0, entry["update_id"])
+
+        # A watcher waiting on one question ignores presses on the others.
+        if args.message_id is not None and entry["message_id"] != args.message_id:
+            continue
 
         reason = None
         if not entry["callback_query_id"] or not isinstance(entry["data"], str):
@@ -232,7 +244,7 @@ async def _handle_callbacks(
             ignored.append({**entry, "reason": reason})
             continue
 
-        if args.auto_answer and not entry["answered"]:
+        if args.auto_answer and not args.peek and not entry["answered"]:
             # An unanswered query leaves a spinner on the button in every
             # client, so acknowledge before handing the press to the caller.
             try:
@@ -262,6 +274,9 @@ async def _handle_callbacks(
             "count": len(accepted),
             "ignored": ignored,
             "ignored_count": len(ignored),
+            # A peek leaves every press pending, so the reader knows nothing
+            # was taken from whoever acts on it.
+            "peek": args.peek,
             # Pass this back as since_id on the next call; the server keeps the
             # same cursor itself, so a repeated call never replays a press.
             "cursor": cursor,

@@ -86,3 +86,45 @@ docker restart tg-relay
 
 `/app` is a host bind mount, so the script, its `offset` cursor, its log and its
 own copy of the press queue survive restarts.
+
+## Watching the queue from a Claude session
+
+The transports above push a press out of this host. The other direction is for
+the session that asked to watch the queue itself and continue when the press
+lands. Both variants read with `peek`, so the press stays pending for whoever
+acts on it:
+
+**A monitor polling over HTTPS.** The session runs a background command that
+calls the MCP server through its published endpoint every few seconds and
+prints a line on the first non-empty result:
+
+```sh
+URL=https://<your-metamcp-host>/metamcp/<endpoint>/mcp
+KEY=<endpoint api key>
+MSG=<message_id of the question>
+while true; do
+  r=$(curl -s -m 20 -X POST "$URL" \
+      -H "Authorization: Bearer $KEY" \
+      -H 'Content-Type: application/json' \
+      -H 'Accept: application/json, text/event-stream' \
+      -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"telegram-bot__message\",\"arguments\":{\"action\":\"callbacks\",\"peek\":true,\"message_id\":$MSG}}}" || true)
+  case "$r" in
+    *'"count":0'*|'') ;;
+    *) echo "PRESS $r"; break ;;
+  esac
+  sleep 15
+done
+```
+
+Two prerequisites, both outside this repo: the session's cloud environment must
+allow that hostname (a **Trusted** network policy blocks it, and the request
+fails at the proxy rather than at your server), and the endpoint's API key has
+to be available to the session.
+
+**A self-scheduled wake-up.** Where the session cannot reach this host at all,
+it schedules its own check-in and peeks through the MCP tool on each wake, with
+no watcher and no network exception -- at whatever granularity the scheduler
+allows.
+
+Either way the session then does the consuming read (`callbacks` without
+`peek`), acts on the decision, and strips the keyboard with `edit(buttons=[])`.

@@ -332,3 +332,27 @@ async def test_resume_map_is_capped(tmp_path):
     assert len(lines) == 500
     assert await bot.lookup_resume_session(1, 0) is None  # oldest rolled off
     assert await bot.lookup_resume_session(1, 504) == "session_01AbCdEfGhIjKlMn"
+
+
+# --- peeking: look without taking ---
+
+
+async def test_peek_leaves_the_queue_pending(tmp_path):
+    bot, _, _ = _queue_bot(tmp_path, [_queued(100)])
+    assert [u["update_id"] for u in await bot.get_callback_queries(consume=False)] == [
+        100
+    ]
+    # Still there for whoever acts on it, and only then consumed.
+    assert [u["update_id"] for u in await bot.get_callback_queries(consume=False)] == [
+        100
+    ]
+    assert [u["update_id"] for u in await bot.get_callback_queries()] == [100]
+    assert await bot.get_callback_queries(consume=False) == []
+
+
+async def test_peek_does_not_confirm_updates_with_telegram():
+    bot, calls = _bot([[_callback_update(100)]])
+    assert len(await bot.get_callback_queries(consume=False)) == 1
+    # One poll and no confirming call: Telegram keeps the update pending.
+    assert len(calls) == 1
+    assert calls[0][0] == "getUpdates"

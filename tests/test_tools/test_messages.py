@@ -292,7 +292,9 @@ async def test_callbacks_returns_normalized_presses(mock_backend):
     assert press["callback_query_id"] == "cbq-100"
     assert press["message_date"] == "2025-08-25T14:03:11Z"
     assert result["cursor"] == 100
-    mock_backend.get_callback_queries.assert_awaited_once_with(since_id=99, limit=20)
+    mock_backend.get_callback_queries.assert_awaited_once_with(
+        since_id=99, limit=20, consume=True
+    )
 
 
 @pytest.mark.asyncio
@@ -476,3 +478,43 @@ async def test_callbacks_echo_the_registered_session(mock_backend):
 
     assert result["callbacks"][0]["session_id"] == "session_01AbCdEfGhIjKlMn"
     mock_backend.lookup_resume_session.assert_awaited_once_with(42, 4711)
+
+
+@pytest.mark.asyncio
+async def test_peek_reads_without_consuming_or_answering(mock_backend):
+    mock_backend.get_callback_queries.return_value = [_callback(100)]
+
+    result = await handle_messages(
+        mock_backend, MessagesArgs(action="callbacks", peek=True)
+    )
+
+    assert result["peek"] is True
+    assert result["count"] == 1
+    mock_backend.get_callback_queries.assert_awaited_once_with(
+        since_id=None, limit=20, consume=False
+    )
+    mock_backend.answer_callback_query.assert_not_awaited()
+    assert result["callbacks"][0]["answered"] is False
+
+
+@pytest.mark.asyncio
+async def test_peek_can_watch_one_question(mock_backend):
+    mock_backend.get_callback_queries.return_value = [_callback(100), _callback(101)]
+    mock_backend.get_callback_queries.return_value[1]["callback_query"]["message"][
+        "message_id"
+    ] = 4712
+
+    result = await handle_messages(
+        mock_backend, MessagesArgs(action="callbacks", peek=True, message_id=4712)
+    )
+
+    assert [p["message_id"] for p in result["callbacks"]] == [4712]
+
+
+@pytest.mark.asyncio
+async def test_filtering_a_consuming_read_is_refused(mock_backend):
+    result = await handle_messages(
+        mock_backend, MessagesArgs(action="callbacks", message_id=4711)
+    )
+    assert "error" in result
+    mock_backend.get_callback_queries.assert_not_awaited()

@@ -300,6 +300,7 @@ async def message(
     allowed_from_ids: list[int] | None = None,
     data_pattern: str | None = None,
     resume_session: str | None = None,
+    peek: bool = False,
 ) -> dict[str, Any]:
     """Send, edit, delete, forward, pin, react, search, browse history, and
     ask a question with inline buttons + read the presses.
@@ -314,7 +315,7 @@ async def message(
     - search (query -> chat_id, limit=20)
     - history (chat_id -> limit=20, offset_id)
     - callbacks (-> since_id, limit=20, auto_answer, answer_text,
-      allowed_from_ids, data_pattern)  [bot mode]
+      allowed_from_ids, data_pattern, peek, message_id)  [bot mode]
     - answer (callback_query_id -> answer_text, show_alert)  [bot mode]
 
     Inline buttons (bot mode only) are rows of callback buttons:
@@ -332,6 +333,10 @@ async def message(
     `callbacks` returns presses since the last read -- the server keeps the
     cursor, so a repeated call never replays a decision -- and acknowledges
     each one (answerCallbackQuery) unless auto_answer=False.
+
+    `callbacks` with peek=true reads without consuming: the presses stay
+    pending for whoever acts on them, and nothing is answered. That is what a
+    watcher polls, optionally narrowed to one question with message_id.
     """
     if _unconfigured or _pending_auth:
         return _not_ready_response()
@@ -365,6 +370,7 @@ async def message(
         allowed_from_ids=allowed_from_ids,
         data_pattern=data_pattern,
         resume_session=resume_session,
+        peek=peek,
     )
     return await handle_messages(get_backend(), args)
 

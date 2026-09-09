@@ -239,3 +239,47 @@ func TestToolResultsAreValidJSON(t *testing.T) {
 		t.Errorf("expected the runtime config in the status, got %#v", decoded)
 	}
 }
+
+// Every property in a published input schema must be a JSON object.
+//
+// A Go field typed `any` with no jsonschema tag infers to the boolean schema
+// `true`. That is valid JSON Schema and means "anything", but a client whose
+// validator expects an object per property rejects the whole tools/list --
+// which is exactly what MetaMCP did, dropping all seven tools over two
+// untagged fields. A description tag turns the schema back into an object.
+//
+// `items` is deliberately not asserted: the buttons array is genuinely
+// heterogeneous (rows of buttons, or a single flat row), so its `items` stays
+// the boolean schema, and the clients in use accept it there.
+func TestToolSchemaPropertiesAreObjects(t *testing.T) {
+	session := connect(t)
+
+	list, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("tools/list failed: %v", err)
+	}
+	if len(list.Tools) == 0 {
+		t.Fatal("no tools to check")
+	}
+
+	for _, tool := range list.Tools {
+		raw, err := json.Marshal(tool.InputSchema)
+		if err != nil {
+			t.Fatalf("%s: could not marshal the input schema: %v", tool.Name, err)
+		}
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatalf("%s: input schema is not an object: %v", tool.Name, err)
+		}
+		for name, property := range schema.Properties {
+			var object map[string]any
+			if err := json.Unmarshal(property, &object); err != nil {
+				t.Errorf("%s.%s is %s, not an object -- give the field a "+
+					"jsonschema description so it infers to one",
+					tool.Name, name, property)
+			}
+		}
+	}
+}

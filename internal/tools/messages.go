@@ -22,12 +22,17 @@ type MessageArgs struct {
 	MessageID int    `json:"message_id,omitempty"`
 	ReplyTo   int    `json:"reply_to,omitempty"`
 	ParseMode string `json:"parse_mode,omitempty" jsonschema:"HTML, MarkdownV2 or Markdown"`
-	FromChat  any    `json:"from_chat,omitempty"`
-	ToChat    any    `json:"to_chat,omitempty"`
-	Emoji     string `json:"emoji,omitempty"`
-	Query     string `json:"query,omitempty"`
-	Limit     int    `json:"limit,omitempty"`
-	OffsetID  int    `json:"offset_id,omitempty"`
+	// These carry a jsonschema description for the same reason chat_id does,
+	// and not only as documentation: a bare `any` infers to the boolean schema
+	// `true`, which is valid JSON Schema but is rejected by clients whose
+	// validator expects every property to be an object -- MetaMCP among them,
+	// where it made the whole tool list fail to load.
+	FromChat any    `json:"from_chat,omitempty" jsonschema:"source chat id or @username"`
+	ToChat   any    `json:"to_chat,omitempty" jsonschema:"destination chat id or @username"`
+	Emoji    string `json:"emoji,omitempty"`
+	Query    string `json:"query,omitempty"`
+	Limit    int    `json:"limit,omitempty"`
+	OffsetID int    `json:"offset_id,omitempty"`
 
 	// Inline buttons and callback queries (bot mode)
 	Buttons         []any   `json:"buttons,omitempty" jsonschema:"rows of {text, data} callback buttons"`

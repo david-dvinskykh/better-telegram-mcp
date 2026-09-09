@@ -378,7 +378,7 @@ func (s *Server) registerTools(server *mcp.Server) {
 	})
 
 	type helpArgs struct {
-		Topic string `json:"topic,omitempty" jsonschema:"telegram|messages|chats|media|contacts|all"`
+		Topic string `json:"topic,omitempty" jsonschema:"telegram|messages|chats|media|contacts|profile|folders|all"`
 	}
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "help",
@@ -389,7 +389,8 @@ func (s *Server) registerTools(server *mcp.Server) {
 			OpenWorldHint:  boolPtr(false),
 		},
 		Description: "Get full documentation for any topic.\n\n" +
-			"Topics: telegram | messages | chats | media | contacts | all (default: all)",
+			"Topics: telegram | messages | chats | media | contacts | profile | " +
+			"folders | all (default: all)",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, args helpArgs) (*mcp.CallToolResult, any, error) {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: tools.HandleHelp(args.Topic)}},
@@ -398,7 +399,7 @@ func (s *Server) registerTools(server *mcp.Server) {
 }
 
 func (s *Server) registerResources(server *mcp.Server) {
-	for _, topic := range []string{"messages", "chats", "media", "contacts"} {
+	for _, topic := range []string{"messages", "chats", "media", "contacts", "profile", "folders"} {
 		server.AddResource(&mcp.Resource{
 			URI:      "telegram://docs/" + topic,
 			Name:     topic,

@@ -8,7 +8,7 @@ import (
 	"github.com/david-dvinskykh/better-telegram-mcp/internal/docs"
 )
 
-var helpTopics = []string{"chats", "contacts", "media", "messages"}
+var helpTopics = []string{"chats", "contacts", "folders", "media", "messages", "profile"}
 
 // HandleHelp returns the documentation for one topic, or all of it.
 //
@@ -37,7 +37,7 @@ func HandleHelp(topic string) string {
 			suggestion = " Did you mean '" + closest + "'?"
 		}
 		return helpError("Unknown topic '" + topic + "'." + suggestion +
-			" Valid: telegram|messages|chats|media|contacts|all")
+			" Valid: telegram|messages|chats|media|contacts|profile|folders|all")
 	}
 
 	if doc := docs.Load(topic); doc != "" {

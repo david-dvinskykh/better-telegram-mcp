@@ -161,8 +161,9 @@ func TestResourcesServeTheDocumentation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resources/list failed: %v", err)
 	}
-	if len(list.Resources) != 5 {
-		t.Errorf("expected four topic documents plus the combined one, got %d", len(list.Resources))
+	// One resource per help topic, plus the combined document.
+	if len(list.Resources) != 7 {
+		t.Errorf("expected six topic documents plus the combined one, got %d", len(list.Resources))
 	}
 
 	read, err := session.ReadResource(context.Background(), &mcp.ReadResourceParams{

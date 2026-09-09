@@ -195,3 +195,70 @@ A per-call `allowed_from_ids` / `data_pattern` overrides the matching env var.
 Callback data is data the bot itself sent, but it round-trips through a client:
 keep validating it, and check the decision against your own record before
 acting on it.
+
+## Beyond send and read
+
+### unpin / unpin_all / pinned
+- `unpin` (chat_id, message_id) takes one message off the pinned list.
+- `unpin_all` (chat_id) clears the list.
+- `pinned` (chat_id, limit=20) reads it.
+
+### read
+Mark a chat read up to a message, or the whole chat when message_id is left
+out (user mode).
+- **chat_id** (required)
+- **message_id**: Read up to here; omit for everything
+
+### context
+The messages either side of one, so a hit from `search` can be read in the
+conversation it belongs to (user mode).
+- **chat_id** (required)
+- **message_id** (required)
+- **around**: How many messages each side (default: 5, max: 50)
+
+### link
+The t.me link to a message. Channels and supergroups have one; a private
+conversation is not addressable by URL.
+- **chat_id** (required)
+- **message_id** (required)
+
+### reactions
+Who reacted to a message, and with what (user mode). To *add* a reaction, use
+`react`.
+- **chat_id** (required)
+- **message_id** (required)
+- **limit**: Max entries (default: 50)
+
+### delete_bulk / purge
+- `delete_bulk` (chat_id, message_ids) removes several messages in one call.
+- `purge` (chat_id, revoke) clears a whole conversation. `revoke=true` also
+  removes it for the other side and cannot be undone.
+
+### forward_bulk
+Move several messages at once, keeping them grouped the way forwarding them
+one at a time would not.
+- **from_chat**, **to_chat**, **message_ids** (all required)
+
+### poll
+Post a poll.
+- **chat_id**, **question**, **options** (2 to 10) required
+- **multiple_choice**: Allow several answers (default: false)
+- **anonymous**: Hide who voted (default: true)
+- **close_at**: RFC3339 time the poll closes
+
+Quiz polls are not supported by this build: the library it uses cannot encode
+the correct-answer field, so a quiz built through it is rejected by Telegram.
+Send a regular poll and say which answer is right in a follow-up message.
+
+### draft_save / draft_list
+Unsent text in a chat, the way typing into it and walking away leaves it
+(user mode).
+- `draft_save` (chat_id, text) stores it; an empty text clears the draft.
+- `draft_list` returns every chat that has one.
+
+### schedule / schedule_list / schedule_cancel
+Queue a message for a time in the future (user mode).
+- `schedule` (chat_id, text, send_at) — send_at is RFC3339, e.g.
+  `2026-01-31T09:00:00Z`, and must be in the future.
+- `schedule_list` (chat_id) shows what is queued.
+- `schedule_cancel` (chat_id, message_ids) drops it before it goes out.

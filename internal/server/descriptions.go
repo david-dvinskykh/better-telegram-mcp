@@ -82,3 +82,32 @@ Actions (required params):
 - setup_start (-> key='force'): Print the local auth command to run
 - setup_reset: Clear saved credentials
 - setup_complete: Re-read credentials and reconnect after running auth`
+
+const profileDescription = `Read and edit the account behind this session, and look up other accounts.
+
+Actions (user mode only):
+- me: The signed-in account
+- update (first_name|last_name|about): Edit the profile; omitted fields stay
+- photo_set (path): Upload and set the avatar
+- photo_delete: Remove the current avatar
+- photos (-> user, limit=20): List an account's avatars
+- user (-> user): Full profile of a user or bot -- bio, common chats, and for a
+  bot its description and command list. Omit user for the signed-in account.
+- privacy_get (key)
+- privacy_set (key, rule)
+
+Privacy keys: status_timestamp | phone_number | phone_call | profile_photo |
+forwards | chat_invite | added_by_phone | voice_messages | about | birthday
+Privacy rules: everybody | contacts | nobody`
+
+const folderDescription = `Manage chat folders -- the tabs above the chat list (user mode only).
+
+Actions:
+- list: Every folder, in tab order
+- get (folder_id): One folder with the chats in it
+- create (title -> chats): New folder holding those chats
+- delete (folder_id): Remove the folder; the chats themselves are untouched
+- add_chat (folder_id, chat_id)
+- remove_chat (folder_id, chat_id)
+- reorder (order): Folder ids in the order the tabs should appear; ids left out
+  keep their relative order after the ones named`

@@ -131,12 +131,13 @@ func TestBinaryServesMCPOverStdio(t *testing.T) {
 		if err != nil {
 			t.Fatalf("tools/list failed: %v", err)
 		}
-		if len(list.Tools) != 7 {
+		const published = 9
+		if len(list.Tools) != published {
 			names := make([]string, 0, len(list.Tools))
 			for _, tool := range list.Tools {
 				names = append(names, tool.Name)
 			}
-			t.Errorf("expected the seven tools, got %d: %v", len(list.Tools), names)
+			t.Errorf("expected %d tools, got %d: %v", published, len(list.Tools), names)
 		}
 	})
 

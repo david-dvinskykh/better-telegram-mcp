@@ -106,6 +106,7 @@ func (s *Server) newBackend() (telegram.Backend, error) {
 			CursorPath:    s.settings.CallbackCursorPath(),
 			QueuePath:     s.settings.CallbackQueueFile,
 			ResumeMapPath: s.settings.ResumeMapFile,
+			AliasesPath:   s.settings.AliasesPath(),
 			APIBase:       s.settings.APIBase,
 		}), nil
 	}
@@ -113,6 +114,7 @@ func (s *Server) newBackend() (telegram.Backend, error) {
 		APIID:       s.settings.APIID,
 		APIHash:     s.settings.APIHash,
 		SessionPath: s.settings.SessionPath(),
+		AliasesPath: s.settings.AliasesPath(),
 	}), nil
 }
 
@@ -311,6 +313,38 @@ func (s *Server) registerTools(server *mcp.Server) {
 			return external("contact", notReady), nil, nil
 		}
 		return external("contact", tools.HandleContact(ctx, backend, args)), nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "profile",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Telegram Profile",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(true),
+		},
+		Description: profileDescription,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, args tools.ProfileArgs) (*mcp.CallToolResult, any, error) {
+		backend, notReady := s.ready()
+		if notReady != nil {
+			return external("profile", notReady), nil, nil
+		}
+		return external("profile", tools.HandleProfile(ctx, backend, args)), nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "folder",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Telegram Folders",
+			DestructiveHint: boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		},
+		Description: folderDescription,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, args tools.FolderArgs) (*mcp.CallToolResult, any, error) {
+		backend, notReady := s.ready()
+		if notReady != nil {
+			return external("folder", notReady), nil, nil
+		}
+		return external("folder", tools.HandleFolder(ctx, backend, args)), nil, nil
 	})
 
 	// config and help return the server's own state, never content authored by

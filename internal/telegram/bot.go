@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/david-dvinskykh/better-telegram-mcp/internal/aliases"
 	"github.com/david-dvinskykh/better-telegram-mcp/internal/security"
 )
 
@@ -70,6 +71,7 @@ type BotBackend struct {
 	cursorPath    string
 	queuePath     string
 	resumeMapPath string
+	aliases       *aliases.Store
 
 	mu             sync.Mutex
 	callbackOffset *int
@@ -82,6 +84,7 @@ type BotOptions struct {
 	CursorPath    string
 	QueuePath     string
 	ResumeMapPath string
+	AliasesPath   string
 	// APIBase overrides DefaultAPIBase, e.g. to reach a self-hosted Bot API
 	// server. Empty means Telegram's own host.
 	APIBase string
@@ -102,8 +105,12 @@ func NewBotBackend(token string, opts BotOptions) *BotBackend {
 		cursorPath:    opts.CursorPath,
 		queuePath:     opts.QueuePath,
 		resumeMapPath: opts.ResumeMapPath,
+		aliases:       aliases.New(opts.AliasesPath),
 	}
 }
+
+// Aliases exposes the local name map so the contact tool can edit it.
+func (b *BotBackend) Aliases() *aliases.Store { return b.aliases }
 
 func (b *BotBackend) Mode() Mode { return ModeBot }
 
@@ -114,9 +121,16 @@ func (b *BotBackend) Mode() Mode { return ModeBot }
 func (b *BotBackend) call(ctx context.Context, method string, params Map) (json.RawMessage, error) {
 	body := Map{}
 	for key, value := range params {
-		if value != nil {
-			body[key] = value
+		if value == nil {
+			continue
 		}
+		// A chat named the way a person says it resolves from the local alias
+		// map. Doing it here covers every method at once, and the Bot API sees
+		// only ids and usernames, which is all it understands.
+		if key == "chat_id" || key == "from_chat_id" {
+			value = b.applyAlias(value)
+		}
+		body[key] = value
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -937,4 +951,24 @@ func clamp(value, low, high int) int {
 func isHTTPURL(value string) bool {
 	lower := strings.ToLower(value)
 	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
+// applyAlias substitutes a saved alias for a chat reference Telegram itself
+// cannot resolve. Anything that is already an id or a username is left alone.
+func (b *BotBackend) applyAlias(value any) any {
+	text, ok := value.(string)
+	if !ok || b.aliases == nil {
+		return value
+	}
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || looksLikeHandle(trimmed) {
+		return value
+	}
+	if _, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+		return value
+	}
+	if entry, found := b.aliases.Lookup(trimmed); found {
+		return entry.ID
+	}
+	return value
 }

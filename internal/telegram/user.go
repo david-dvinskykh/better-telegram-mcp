@@ -21,6 +21,7 @@ import (
 	"github.com/gotd/td/telegram/uploader"
 	"github.com/gotd/td/tg"
 
+	"github.com/david-dvinskykh/better-telegram-mcp/internal/aliases"
 	"github.com/david-dvinskykh/better-telegram-mcp/internal/security"
 )
 
@@ -41,6 +42,8 @@ type UserBackend struct {
 	peers    *peers.Manager
 	auth     *auth.Client
 	uploader *uploader.Uploader
+
+	aliases *aliases.Store
 
 	lock    *sessionLock
 	stop    context.CancelFunc
@@ -65,6 +68,7 @@ type UserOptions struct {
 	APIID       int
 	APIHash     string
 	SessionPath string
+	AliasesPath string
 }
 
 // NewUserBackend builds a user-mode backend. The session file is created on
@@ -74,8 +78,12 @@ func NewUserBackend(opts UserOptions) *UserBackend {
 		apiID:       opts.APIID,
 		apiHash:     opts.APIHash,
 		sessionPath: opts.SessionPath,
+		aliases:     aliases.New(opts.AliasesPath),
 	}
 }
+
+// Aliases exposes the local name map so the contact tool can edit it.
+func (u *UserBackend) Aliases() *aliases.Store { return u.aliases }
 
 func (u *UserBackend) Mode() Mode { return ModeUser }
 
@@ -347,6 +355,9 @@ func (u *UserBackend) resolvePeer(ctx context.Context, chatID any) (tg.InputPeer
 		if id, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
 			return u.resolveNumeric(ctx, id)
 		}
+		if lower := strings.ToLower(trimmed); lower == "me" || lower == "self" {
+			return &tg.InputPeerSelf{}, nil
+		}
 		if strings.HasPrefix(trimmed, "+") {
 			user, err := u.peers.ResolvePhone(ctx, trimmed)
 			if err != nil {
@@ -354,9 +365,17 @@ func (u *UserBackend) resolvePeer(ctx context.Context, chatID any) (tg.InputPeer
 			}
 			return user.InputPeer(), nil
 		}
+		// A reference Telegram cannot resolve on its own -- a person's name as
+		// someone actually says it -- is only meaningful through the local
+		// alias map, so that is consulted before the network call.
+		if !looksLikeHandle(trimmed) {
+			if entry, ok := u.aliases.Lookup(trimmed); ok {
+				return u.resolveNumeric(ctx, entry.ID)
+			}
+		}
 		peer, err := u.peers.Resolve(ctx, strings.TrimPrefix(trimmed, "@"))
 		if err != nil {
-			return nil, err
+			return nil, unknownReference(trimmed, err)
 		}
 		return peer.InputPeer(), nil
 	case int:

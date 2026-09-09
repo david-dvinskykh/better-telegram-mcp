@@ -49,6 +49,10 @@ type Settings struct {
 	// Where message_id -> Claude session registrations are appended.
 	ResumeMapFile string
 
+	// AliasesFile is the local map from the words people use for a contact to
+	// the id behind them. Empty means the default under DataDir.
+	AliasesFile string
+
 	// APIBase overrides https://api.telegram.org for bot mode. Telegram
 	// supports self-hosted Bot API servers
 	// (https://core.telegram.org/bots/api#using-a-local-bot-api-server), and
@@ -71,6 +75,7 @@ func Load() (*Settings, error) {
 		CallbackDataPattern: env("TELEGRAM_CALLBACK_DATA_PATTERN"),
 		CallbackQueueFile:   env("TELEGRAM_CALLBACK_QUEUE_FILE"),
 		ResumeMapFile:       env("TELEGRAM_RESUME_MAP_FILE"),
+		AliasesFile:         env("TELEGRAM_ALIASES_FILE"),
 		APIBase:             strings.TrimRight(env("TELEGRAM_API_BASE"), "/"),
 		Mode:                ModeBot,
 	}
@@ -160,6 +165,15 @@ func (s *Settings) SessionPath() string {
 // a restart cannot re-deliver a decision that was already acted on.
 func (s *Settings) CallbackCursorPath() string {
 	return filepath.Join(s.DataDir, s.SessionName+".callbacks.json")
+}
+
+// AliasesPath is where the contact aliases live. They are keyed by person, not
+// by session, so every session on this machine shares one file.
+func (s *Settings) AliasesPath() string {
+	if s.AliasesFile != "" {
+		return s.AliasesFile
+	}
+	return filepath.Join(s.DataDir, "aliases.json")
 }
 
 func parseSenders(raw string) ([]int64, error) {

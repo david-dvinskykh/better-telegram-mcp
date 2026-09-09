@@ -46,7 +46,7 @@ func connect(t *testing.T) *mcp.ClientSession {
 
 // The published tool surface is a contract with every client config already out
 // there, so the set is asserted exactly rather than loosely.
-func TestServerPublishesTheSevenTools(t *testing.T) {
+func TestServerPublishesItsToolSurface(t *testing.T) {
 	session := connect(t)
 
 	result, err := session.ListTools(context.Background(), nil)
@@ -65,7 +65,10 @@ func TestServerPublishesTheSevenTools(t *testing.T) {
 		}
 	}
 
-	want := []string{"message", "chat", "media", "contact", "config", "config__open_relay", "help"}
+	want := []string{
+		"message", "chat", "media", "contact", "profile", "folder",
+		"config", "config__open_relay", "help",
+	}
 	for _, name := range want {
 		if !got[name] {
 			t.Errorf("tool %q is missing", name)

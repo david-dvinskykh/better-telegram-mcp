@@ -175,14 +175,26 @@ func (s *Settings) detectMode() {
 	}
 }
 
-// hasUserCredentials reports whether user mode can start. A session string is
-// an account that is already signed in, so it needs no phone number: the phone
-// is only how a fresh sign-in begins.
+// hasUserCredentials reports whether user mode can start.
+//
+// A phone number is how a fresh sign-in begins; a session string, and a session
+// file that sign-in already produced, are accounts that are signed in already
+// and need no phone. Counting the file matters after the first run: a
+// deployment that seeded its session from a string and then dropped the string
+// still has a working account, and refusing to start would be wrong.
 func (s *Settings) hasUserCredentials() bool {
 	if s.APIID == 0 || s.APIHash == "" {
 		return false
 	}
-	return s.Phone != "" || s.SessionString != ""
+	return s.Phone != "" || s.SessionString != "" || s.hasSession()
+}
+
+// hasSession reports whether a signed-in session is already on disk. An empty
+// file does not count: the server pre-creates one with 0600 before writing to
+// it, so its presence alone says nothing.
+func (s *Settings) hasSession() bool {
+	info, err := os.Stat(s.SessionPath())
+	return err == nil && info.Size() > 0
 }
 
 // IsConfigured reports whether any usable Telegram credential is present.

@@ -1,7 +1,9 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -177,5 +179,79 @@ func TestABotTokenStillWinsOverASessionString(t *testing.T) {
 	}
 	if settings.Mode != ModeBot {
 		t.Errorf("expected bot mode, got %q", settings.Mode)
+	}
+}
+
+// After the first run the session file is the credential: a deployment that
+// seeded its session from a string and then dropped the string still has a
+// signed-in account, and refusing to start would be wrong.
+func TestAnExistingSessionFileCountsAsConfigured(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	t.Setenv("TELEGRAM_PHONE", "")
+	t.Setenv("TELEGRAM_SESSION_STRING", "")
+	t.Setenv("TELEGRAM_DATA_DIR", dir)
+
+	before, err := Load()
+	if err != nil {
+		t.Fatalf("could not load settings: %v", err)
+	}
+	if before.IsConfigured() {
+		t.Fatal("nothing is configured yet")
+	}
+
+	if err := os.WriteFile(before.SessionPath(), []byte(`{"Version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := Load()
+	if err != nil {
+		t.Fatalf("could not load settings: %v", err)
+	}
+	if !after.IsConfigured() {
+		t.Error("a session on disk should count as configured")
+	}
+	if after.Mode != ModeUser {
+		t.Errorf("expected user mode, got %q", after.Mode)
+	}
+}
+
+// The server pre-creates the session file with 0600 before writing to it, so
+// an empty one says nothing about being signed in.
+func TestAnEmptySessionFileDoesNotCount(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	t.Setenv("TELEGRAM_PHONE", "")
+	t.Setenv("TELEGRAM_SESSION_STRING", "")
+	t.Setenv("TELEGRAM_DATA_DIR", dir)
+
+	settings, err := Load()
+	if err != nil {
+		t.Fatalf("could not load settings: %v", err)
+	}
+	if err := os.WriteFile(settings.SessionPath(), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	again, err := Load()
+	if err != nil {
+		t.Fatalf("could not load settings: %v", err)
+	}
+	if again.IsConfigured() {
+		t.Error("an empty session file should not count as configured")
+	}
+}
+
+// TELEGRAM_SESSION_LOCK is the escape hatch for a supervisor that runs several
+// processes per server, so a typo in it has to be reported rather than
+// silently leaving the exclusive default in place.
+func TestAnUnknownSessionLockModeIsRejected(t *testing.T) {
+	t.Setenv("TELEGRAM_DATA_DIR", t.TempDir())
+	t.Setenv("TELEGRAM_SESSION_LOCK", "share")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected an error")
+	} else if !strings.Contains(err.Error(), "shared") {
+		t.Errorf("the error should name the valid values, got %v", err)
 	}
 }

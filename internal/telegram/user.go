@@ -36,6 +36,7 @@ type UserBackend struct {
 	apiHash       string
 	sessionPath   string
 	sessionString string
+	sharedLock    bool
 
 	client   *telegram.Client
 	api      *tg.Client
@@ -74,6 +75,10 @@ type UserOptions struct {
 	// session string, which is what the Python Telegram servers carry. It is
 	// used only when the session file is empty.
 	SessionString string
+	// SharedLock lets several processes on this host share one session instead
+	// of the second being refused. Safe only when they all reach Telegram from
+	// the same address.
+	SharedLock bool
 }
 
 // NewUserBackend builds a user-mode backend. The session file is created on
@@ -84,6 +89,7 @@ func NewUserBackend(opts UserOptions) *UserBackend {
 		apiHash:       opts.APIHash,
 		sessionPath:   opts.SessionPath,
 		sessionString: opts.SessionString,
+		sharedLock:    opts.SharedLock,
 		aliases:       aliases.New(opts.AliasesPath),
 	}
 }
@@ -113,7 +119,7 @@ func (u *UserBackend) Connect(ctx context.Context) error {
 	// Claim the session before opening it. Two clients sharing one auth key
 	// make Telegram invalidate it, which is how a second server turns every
 	// call in the first one into a connection failure.
-	lock, err := acquireSessionLock(u.sessionPath)
+	lock, err := acquireSessionLock(u.sessionPath, u.sharedLock)
 	if err != nil {
 		return err
 	}

@@ -106,6 +106,13 @@ This build refuses the second process instead:
 - The refusal message names the session, the PID holding it, and the two ways
   out: stop the other process, or give this one its own
   `TELEGRAM_SESSION_NAME`.
+- `TELEGRAM_SESSION_LOCK=shared` takes the lock in shared mode instead, so any
+  number of processes on the host use one session. That is the third way out,
+  and the one a MetaMCP deployment needs: it opens several connections to one
+  stdio server, which means one process per connection, and under the default
+  every process after the first is refused and exits -- which the supervisor
+  counts as a crash. Shared mode is safe only when all of them reach Telegram
+  from the same address, which processes in one container do.
 - A connection that dies later reports gotd's own reason rather than
   "Not connected", so the next tool call says what actually happened.
 
@@ -181,6 +188,7 @@ Unchanged from the Python server, minus the HTTP-only ones:
 | `TELEGRAM_PHONE` | user mode phone number, for a fresh sign-in |
 | `TELEGRAM_SESSION_STRING` | Telethon session string of an account already signed in; seeds an empty session, then ignored |
 | `TELEGRAM_SESSION_NAME` | session name, default `default` — also the way to run two servers side by side |
+| `TELEGRAM_SESSION_LOCK` | `exclusive` (default) or `shared`; see **Session locking** |
 | `TELEGRAM_DATA_DIR` | default `~/.better-telegram-mcp` |
 | `TELEGRAM_ALLOWED_CALLBACK_SENDERS` | comma-separated user ids allowed to press a button |
 | `TELEGRAM_CALLBACK_DATA_PATTERN` | regex the callback data must fully match |

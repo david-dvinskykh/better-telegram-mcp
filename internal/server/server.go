@@ -116,6 +116,7 @@ func (s *Server) newBackend() (telegram.Backend, error) {
 		SessionPath:   s.settings.SessionPath(),
 		AliasesPath:   s.settings.AliasesPath(),
 		SessionString: s.settings.SessionString,
+		SharedLock:    s.settings.SharedSessionLock,
 	}), nil
 }
 

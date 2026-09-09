@@ -16,8 +16,13 @@ type sessionLock struct {
 	path string
 }
 
-func acquireSessionLock(sessionPath string) (*sessionLock, error) {
+func acquireSessionLock(sessionPath string, shared bool) (*sessionLock, error) {
 	path := sessionPath + ".lock"
+	if shared {
+		// There is no shared mode without flock, and refusing would be worse
+		// than the guard is worth on a platform this server is not deployed on.
+		return &sessionLock{}, nil
+	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
 	if err != nil {
 		if os.IsExist(err) {

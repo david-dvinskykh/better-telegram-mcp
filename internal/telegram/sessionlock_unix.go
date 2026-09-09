@@ -29,14 +29,24 @@ type sessionLock struct {
 }
 
 // acquireSessionLock claims the session, or reports who holds it.
-func acquireSessionLock(sessionPath string) (*sessionLock, error) {
+//
+// shared takes the lock in shared mode instead, letting any number of processes
+// on this host use one session. That is safe only when they all reach Telegram
+// from the same address -- which is what a supervisor spawning several
+// connections to one stdio server inside one container does, and is the reason
+// the option exists at all.
+func acquireSessionLock(sessionPath string, shared bool) (*sessionLock, error) {
 	path := sessionPath + ".lock"
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open the session lock at %s: %w", path, err)
 	}
 
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	mode := syscall.LOCK_EX
+	if shared {
+		mode = syscall.LOCK_SH
+	}
+	if err := syscall.Flock(int(file.Fd()), mode|syscall.LOCK_NB); err != nil {
 		holder := readLockHolder(file)
 		_ = file.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
@@ -50,9 +60,13 @@ func acquireSessionLock(sessionPath string) (*sessionLock, error) {
 	}
 
 	// Record who holds it, purely so the next process can name the culprit.
-	if err := file.Truncate(0); err == nil {
-		_, _ = file.WriteAt([]byte(strconv.Itoa(os.Getpid())), 0)
-		_ = file.Sync()
+	// Under a shared lock several processes hold it at once, so the pid would
+	// be a lie: whoever wrote last is not the only holder.
+	if !shared {
+		if err := file.Truncate(0); err == nil {
+			_, _ = file.WriteAt([]byte(strconv.Itoa(os.Getpid())), 0)
+			_ = file.Sync()
+		}
 	}
 	return &sessionLock{file: file, path: path}, nil
 }

@@ -43,6 +43,10 @@ type Settings struct {
 	// seeds an empty session file and is ignored once one exists.
 	SessionString string
 
+	// SharedSessionLock lets several processes on this host use one MTProto
+	// session instead of the second being refused.
+	SharedSessionLock bool
+
 	// Guardrails for message(action="callbacks"): who may press a button and
 	// what the callback data must look like. Empty means no filter.
 	AllowedCallbackSenders []int64
@@ -98,6 +102,17 @@ func Load() (*Settings, error) {
 	}
 	if raw := env("TELEGRAM_SESSION_NAME"); raw != "" {
 		s.SessionName = raw
+	}
+
+	switch strings.ToLower(env("TELEGRAM_SESSION_LOCK")) {
+	case "", "exclusive":
+		s.SharedSessionLock = false
+	case "shared":
+		s.SharedSessionLock = true
+	default:
+		return nil, fmt.Errorf(
+			"TELEGRAM_SESSION_LOCK must be 'exclusive' (the default) or 'shared', got %q",
+			env("TELEGRAM_SESSION_LOCK"))
 	}
 
 	dataDir := env("TELEGRAM_DATA_DIR")

@@ -32,9 +32,10 @@ import (
 // uses the API handle the callback published; Disconnect cancels the context,
 // which is what ends Run.
 type UserBackend struct {
-	apiID       int
-	apiHash     string
-	sessionPath string
+	apiID         int
+	apiHash       string
+	sessionPath   string
+	sessionString string
 
 	client   *telegram.Client
 	api      *tg.Client
@@ -69,16 +70,21 @@ type UserOptions struct {
 	APIHash     string
 	SessionPath string
 	AliasesPath string
+	// SessionString adopts an account already signed in elsewhere: a Telethon
+	// session string, which is what the Python Telegram servers carry. It is
+	// used only when the session file is empty.
+	SessionString string
 }
 
 // NewUserBackend builds a user-mode backend. The session file is created on
 // Connect, not here.
 func NewUserBackend(opts UserOptions) *UserBackend {
 	return &UserBackend{
-		apiID:       opts.APIID,
-		apiHash:     opts.APIHash,
-		sessionPath: opts.SessionPath,
-		aliases:     aliases.New(opts.AliasesPath),
+		apiID:         opts.APIID,
+		apiHash:       opts.APIHash,
+		sessionPath:   opts.SessionPath,
+		sessionString: opts.SessionString,
+		aliases:       aliases.New(opts.AliasesPath),
 	}
 }
 
@@ -98,6 +104,9 @@ func (u *UserBackend) Connect(ctx context.Context) error {
 	}
 
 	if err := u.prepareSessionFile(); err != nil {
+		return err
+	}
+	if err := u.importTelethonSession(ctx); err != nil {
 		return err
 	}
 

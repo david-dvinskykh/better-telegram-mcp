@@ -43,6 +43,7 @@ Stamp the version into the binary with
 ```bash
 better-telegram-mcp auth --bot-token <token>    # bot mode, token from @BotFather
 better-telegram-mcp auth --phone +48123456789   # user mode: prompts for the OTP, then 2FA
+better-telegram-mcp auth --session-string <s>   # user mode: adopt an account already signed in
 better-telegram-mcp logout                      # revoke and remove everything local
 ```
 
@@ -155,6 +156,20 @@ repointing an existing alias needs `replace=true`.
 The file is `aliases.json` under the data directory (override with
 `TELEGRAM_ALIASES_FILE`), written 0600, and never sent to Telegram.
 
+## Adopting an existing account
+
+`TELEGRAM_SESSION_STRING` takes a Telethon session string -- the credential the
+Python Telegram servers carry -- and signs in as that account without another
+SMS code. The string seeds an empty session file and is ignored once one
+exists, so leaving it in the environment is safe across restarts. The same
+thing from the CLI is `better-telegram-mcp auth --session-string <string>`.
+
+It is a **move, not a copy**. The auth key inside the string is the account,
+and Telegram invalidates a key it sees on two connections at once, so whatever
+server the string came from has to be stopped first or both end up
+disconnected. The `flock` guard below covers processes of this server only; it
+cannot see a Python one holding the same key.
+
 ## Environment
 
 Unchanged from the Python server, minus the HTTP-only ones:
@@ -163,7 +178,8 @@ Unchanged from the Python server, minus the HTTP-only ones:
 | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | bot mode |
 | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | user mode; both have built-in defaults |
-| `TELEGRAM_PHONE` | user mode phone number |
+| `TELEGRAM_PHONE` | user mode phone number, for a fresh sign-in |
+| `TELEGRAM_SESSION_STRING` | Telethon session string of an account already signed in; seeds an empty session, then ignored |
 | `TELEGRAM_SESSION_NAME` | session name, default `default` — also the way to run two servers side by side |
 | `TELEGRAM_DATA_DIR` | default `~/.better-telegram-mcp` |
 | `TELEGRAM_ALLOWED_CALLBACK_SENDERS` | comma-separated user ids allowed to press a button |

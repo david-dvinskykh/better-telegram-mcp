@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -31,6 +32,8 @@ Usage:
   better-telegram-mcp                        Serve the MCP protocol on stdio
   better-telegram-mcp auth --bot-token TOKEN Authenticate as a bot (@BotFather)
   better-telegram-mcp auth --phone +NUMBER   Authenticate as a user (OTP, then 2FA if set)
+  better-telegram-mcp auth --session-string S  Adopt an account already signed in
+                                             elsewhere (a Telethon session string)
   better-telegram-mcp logout                 Revoke and remove the local credentials
   better-telegram-mcp version                Print the version
 
@@ -149,22 +152,92 @@ func authCommand(argv []string) int {
 	flags := flag.NewFlagSet("auth", flag.ContinueOnError)
 	botToken := flags.String("bot-token", "", "Bot API token from @BotFather (bot mode)")
 	phone := flags.String("phone", "", "Phone number as +<country><number> (user mode, interactive)")
+	sessionString := flags.String("session-string", "",
+		"Telethon session string of an account already signed in (user mode)")
 	if err := flags.Parse(argv); err != nil {
 		return 2
 	}
 
-	switch {
-	case *botToken != "" && *phone != "":
-		fmt.Fprintln(os.Stderr, "auth takes either --bot-token or --phone, not both.")
+	given := 0
+	for _, value := range []string{*botToken, *phone, *sessionString} {
+		if value != "" {
+			given++
+		}
+	}
+	if given > 1 {
+		fmt.Fprintln(os.Stderr,
+			"auth takes one of --bot-token, --phone or --session-string, not several.")
 		return 2
+	}
+
+	switch {
 	case *botToken != "":
 		return authBot(*botToken)
 	case *phone != "":
 		return authPhone(*phone)
+	case *sessionString != "":
+		return authSessionString(*sessionString)
 	default:
-		fmt.Fprintln(os.Stderr, "auth requires --bot-token <token> or --phone <+number>.")
+		fmt.Fprintln(os.Stderr,
+			"auth requires --bot-token <token>, --phone <+number> or --session-string <string>.")
 		return 2
 	}
+}
+
+// authSessionString adopts an account that is already signed in somewhere else.
+//
+// The auth key inside the string is the account. Telegram invalidates a key it
+// sees on two connections at once, so this is a move, not a copy: whatever
+// server the string came from has to stop first, or both end up disconnected.
+func authSessionString(sessionString string) int {
+	settings, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
+		return 1
+	}
+
+	ctx := context.Background()
+	if err := os.MkdirAll(filepath.Dir(settings.SessionPath()), 0o700); err != nil {
+		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
+		return 1
+	}
+	if err := telegram.ImportTelethonSessionFile(ctx, settings.SessionPath(), sessionString); err != nil {
+		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
+		return 1
+	}
+
+	backend := telegram.NewUserBackend(telegram.UserOptions{
+		APIID:       settings.APIID,
+		APIHash:     settings.APIHash,
+		SessionPath: settings.SessionPath(),
+		AliasesPath: settings.AliasesPath(),
+	})
+	if err := backend.Connect(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
+		return 1
+	}
+	defer backend.Disconnect(ctx)
+
+	if !backend.IsAuthorized(ctx) {
+		fmt.Fprintln(os.Stderr,
+			"That session string did not sign in. It may belong to a different "+
+				"api_id, or it may have been revoked -- Telegram invalidates an "+
+				"auth key used from two connections at once.")
+		return 1
+	}
+
+	who := "the account"
+	if account, err := backend.GetMe(ctx); err == nil {
+		if name, ok := account["first_name"].(string); ok && name != "" {
+			who = name
+		}
+		if username, ok := account["username"].(string); ok && username != "" {
+			who = "@" + username
+		}
+	}
+	fmt.Printf("Adopted the session of %s (user mode). Saved to %s.\n",
+		who, settings.SessionPath())
+	return 0
 }
 
 func authBot(token string) int {

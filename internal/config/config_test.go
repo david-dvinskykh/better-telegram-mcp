@@ -143,3 +143,39 @@ func TestPathsHangOffTheSessionName(t *testing.T) {
 		t.Errorf("unexpected cursor path: %s", settings.CallbackCursorPath())
 	}
 }
+
+// A session string is an account that is already signed in, so it starts user
+// mode on its own -- the phone number is only how a fresh sign-in begins.
+func TestASessionStringAloneConfiguresUserMode(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	t.Setenv("TELEGRAM_PHONE", "")
+	t.Setenv("TELEGRAM_SESSION_STRING", "1AsCoAAEBu2Fh")
+	t.Setenv("TELEGRAM_DATA_DIR", t.TempDir())
+
+	settings, err := Load()
+	if err != nil {
+		t.Fatalf("could not load settings: %v", err)
+	}
+	if !settings.IsConfigured() {
+		t.Error("a session string should count as configured")
+	}
+	if settings.Mode != ModeUser {
+		t.Errorf("expected user mode, got %q", settings.Mode)
+	}
+}
+
+// A bot token still wins: it is the cheaper mode, and it is what an operator
+// who sets both is asking for.
+func TestABotTokenStillWinsOverASessionString(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "123:token")
+	t.Setenv("TELEGRAM_SESSION_STRING", "1AsCoAAEBu2Fh")
+	t.Setenv("TELEGRAM_DATA_DIR", t.TempDir())
+
+	settings, err := Load()
+	if err != nil {
+		t.Fatalf("could not load settings: %v", err)
+	}
+	if settings.Mode != ModeBot {
+		t.Errorf("expected bot mode, got %q", settings.Mode)
+	}
+}

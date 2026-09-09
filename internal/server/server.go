@@ -111,10 +111,11 @@ func (s *Server) newBackend() (telegram.Backend, error) {
 		}), nil
 	}
 	return telegram.NewUserBackend(telegram.UserOptions{
-		APIID:       s.settings.APIID,
-		APIHash:     s.settings.APIHash,
-		SessionPath: s.settings.SessionPath(),
-		AliasesPath: s.settings.AliasesPath(),
+		APIID:         s.settings.APIID,
+		APIHash:       s.settings.APIHash,
+		SessionPath:   s.settings.SessionPath(),
+		AliasesPath:   s.settings.AliasesPath(),
+		SessionString: s.settings.SessionString,
 	}), nil
 }
 

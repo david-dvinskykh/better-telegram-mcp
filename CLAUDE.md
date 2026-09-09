@@ -88,6 +88,10 @@ Session persist: `~/.better-telegram-mcp/<name>.session`, permission 600.
 - `TELEGRAM_ALIASES_FILE` -- optional (Go server); the local map from a
   person's own wording for a contact to the id behind it, default
   `<data dir>/aliases.json`
+- `TELEGRAM_SESSION_STRING` -- optional (Go server); a Telethon session string
+  of an account already signed in, which seeds an empty session file and is
+  ignored afterwards. Moving one, not copying: Telegram invalidates an auth key
+  seen on two connections at once, so the server it came from must stop first.
 - `MCP_TRANSPORT` / `TRANSPORT_MODE` -- set to `http` to opt into HTTP mode (default wire transport is stdio); `--http` CLI flag does the same
 - `PUBLIC_URL` -- deployed hostname; presence flips on the multi-user OAuth branch (with the DCR secret + api_id/api_hash)
 - `MCP_DCR_SERVER_SECRET` -- multi-user remote OAuth shared secret (with `PUBLIC_URL`); legacy `DCR_SERVER_SECRET` still accepted

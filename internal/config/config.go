@@ -38,6 +38,11 @@ type Settings struct {
 	SessionName string
 	DataDir     string
 
+	// SessionString adopts an account that is already signed in: a Telethon
+	// session string, the credential the Python Telegram servers carry. It
+	// seeds an empty session file and is ignored once one exists.
+	SessionString string
+
 	// Guardrails for message(action="callbacks"): who may press a button and
 	// what the callback data must look like. Empty means no filter.
 	AllowedCallbackSenders []int64
@@ -71,6 +76,7 @@ func Load() (*Settings, error) {
 		APIID:               bundledAPIID,
 		APIHash:             bundledAPIHash,
 		Phone:               env("TELEGRAM_PHONE"),
+		SessionString:       env("TELEGRAM_SESSION_STRING"),
 		SessionName:         "default",
 		CallbackDataPattern: env("TELEGRAM_CALLBACK_DATA_PATTERN"),
 		CallbackQueueFile:   env("TELEGRAM_CALLBACK_QUEUE_FILE"),
@@ -124,6 +130,9 @@ func (s *Settings) ApplySaved(saved map[string]string) {
 	if s.Phone == "" {
 		s.Phone = saved["TELEGRAM_PHONE"]
 	}
+	if s.SessionString == "" {
+		s.SessionString = saved["TELEGRAM_SESSION_STRING"]
+	}
 	if env("TELEGRAM_API_ID") == "" {
 		if raw := saved["TELEGRAM_API_ID"]; raw != "" {
 			if id, err := strconv.Atoi(raw); err == nil {
@@ -146,14 +155,24 @@ func (s *Settings) detectMode() {
 	switch {
 	case s.BotToken != "":
 		s.Mode = ModeBot
-	case s.Phone != "" && s.APIID != 0 && s.APIHash != "":
+	case s.hasUserCredentials():
 		s.Mode = ModeUser
 	}
 }
 
+// hasUserCredentials reports whether user mode can start. A session string is
+// an account that is already signed in, so it needs no phone number: the phone
+// is only how a fresh sign-in begins.
+func (s *Settings) hasUserCredentials() bool {
+	if s.APIID == 0 || s.APIHash == "" {
+		return false
+	}
+	return s.Phone != "" || s.SessionString != ""
+}
+
 // IsConfigured reports whether any usable Telegram credential is present.
 func (s *Settings) IsConfigured() bool {
-	return s.BotToken != "" || (s.Phone != "" && s.APIID != 0 && s.APIHash != "")
+	return s.BotToken != "" || s.hasUserCredentials()
 }
 
 // SessionPath is the on-disk MTProto session for user mode.

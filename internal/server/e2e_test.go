@@ -234,3 +234,38 @@ func TestBinaryExitsWhenUnconfigured(t *testing.T) {
 		t.Errorf("the exit message should name the command to run, got %s", output)
 	}
 }
+
+// A client shuts an stdio server down by closing the pipe. That is an ordinary
+// stop, and it must not look like a crash: MetaMCP restarts its servers that
+// way, and a non-zero exit with an error line makes a healthy server read as a
+// failing one in the supervisor's log.
+func TestBinaryExitsCleanlyWhenTheClientClosesThePipe(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a binary and spawns it")
+	}
+	telegram := &stubTelegram{}
+	stub := telegram.start(t)
+	binary := buildBinary(t)
+
+	command := exec.Command(binary)
+	command.Env = append(os.Environ(),
+		"TELEGRAM_BOT_TOKEN=123456:AAFakeTokenForTheStubServer0123456789",
+		"TELEGRAM_API_BASE="+stub.URL,
+		"TELEGRAM_DATA_DIR="+t.TempDir(),
+	)
+	// A complete handshake, then EOF -- exactly what a client does on quit.
+	command.Stdin = strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":` +
+			`{"protocolVersion":"2025-06-18","capabilities":{},` +
+			`"clientInfo":{"name":"probe","version":"1"}}}` + "\n")
+	var stderr strings.Builder
+	command.Stderr = &stderr
+	command.Stdout = io.Discard
+
+	if err := command.Run(); err != nil {
+		t.Fatalf("a closed pipe should exit 0, got %v\nstderr:\n%s", err, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "[better-telegram-mcp]") {
+		t.Errorf("a clean shutdown should not log an error: %s", stderr.String())
+	}
+}

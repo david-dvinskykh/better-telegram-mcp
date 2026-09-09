@@ -8,12 +8,15 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/term"
 
 	"github.com/david-dvinskykh/better-telegram-mcp/internal/config"
@@ -95,11 +98,40 @@ func serve() int {
 	}
 	defer srv.Close(context.WithoutCancel(ctx))
 
-	if err := srv.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+	if err := srv.Run(ctx); err != nil && !isCleanShutdown(err) {
 		fmt.Fprintf(os.Stderr, "[better-telegram-mcp] %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+// JSON-RPC codes the SDK uses when a session is torn down on purpose. They are
+// not exported as sentinels from a public package, but the wire error they
+// travel in is, and it carries the code.
+const (
+	codeClientClosing = -32003
+	codeServerClosing = -32004
+)
+
+// isCleanShutdown reports whether the server stopped because the session ended,
+// rather than because something went wrong.
+//
+// A client shuts an stdio server down by closing the pipe: MetaMCP does it on
+// restart, an editor does it on quit. Reporting that as a failure puts an error
+// in the supervisor's log and a non-zero exit code on an ordinary stop, which
+// is how a healthy server gets mistaken for a crashing one.
+func isCleanShutdown(err error) bool {
+	if err == nil ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, io.EOF) ||
+		errors.Is(err, mcp.ErrConnectionClosed) {
+		return true
+	}
+	var wire *jsonrpc.Error
+	if errors.As(err, &wire) {
+		return wire.Code == codeServerClosing || wire.Code == codeClientClosing
+	}
+	return false
 }
 
 const notConfiguredMessage = `[better-telegram-mcp] No Telegram credentials configured.

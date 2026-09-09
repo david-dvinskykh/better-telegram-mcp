@@ -84,13 +84,22 @@ type ChatExtras interface {
 // MediaExtras is everything the `media` tool does beyond send/download.
 type MediaExtras interface {
 	SendAlbum(ctx context.Context, chatID any, paths []string, caption string) ([]Map, error)
-	SendVoice(ctx context.Context, chatID any, path string) (Map, error)
-	SendSticker(ctx context.Context, chatID any, sticker string) (Map, error)
+	SendSticker(ctx context.Context, chatID any, opts StickerOptions) (Map, error)
 	ListStickerSets(ctx context.Context) ([]Map, error)
-	SearchGIFs(ctx context.Context, query string, limit int) ([]Map, error)
-	SendGIF(ctx context.Context, chatID any, gif, caption string) (Map, error)
+	ListStickers(ctx context.Context, set string) ([]Map, error)
+	SavedGIFs(ctx context.Context, limit int) ([]Map, error)
+	SendGIF(ctx context.Context, chatID any, documentID int64, caption string) (Map, error)
 	MediaInfo(ctx context.Context, chatID any, messageID int) (Map, error)
 	ListPhotos(ctx context.Context, chatID any, limit int) ([]Map, error)
+}
+
+// StickerOptions says which sticker to send: a local .webp file, or one picked
+// out of a set by the emoji it stands for or by its position in the set.
+type StickerOptions struct {
+	Path  string
+	Set   string
+	Emoji string
+	Index int
 }
 
 // ContactExtras is everything the `contact` tool does beyond list/search/add/

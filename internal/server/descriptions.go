@@ -93,22 +93,49 @@ Actions (chat_id: "@username" | int | a saved alias):
 - search_public (query -> limit=20): The public directory  [user mode]
 - common (user_id -> limit=50): Chats shared with someone  [user mode]`
 
-const mediaDescription = `Send photos, files, voice, video, and download media from messages.
+const mediaDescription = `Send photos, files, voice, video, albums, stickers and GIFs; download
+media from messages; and index what a chat holds without transferring it.
 
 Actions (file_path_or_url: local path or URL):
 - send_photo (chat_id, file_path_or_url -> caption)
 - send_file (chat_id, file_path_or_url -> caption)
 - send_voice (chat_id, file_path_or_url -> caption)
 - send_video (chat_id, file_path_or_url -> caption)
-- download (chat_id, message_id -> output_dir; bot mode also requires file_id)`
+- send_album (chat_id, files -> caption): 2 to 10 files as one grouped message
+- send_sticker (chat_id, and either file_path_or_url to a .webp, or
+  sticker_set with emoji or index)
+- send_gif (chat_id, document_id -> caption): one of the saved GIFs
+- download (chat_id, message_id -> output_dir; bot mode also requires file_id)
+- info (chat_id, message_id): What the attachment is and how big  [user mode]
+- photos (chat_id -> limit=20): Index the photos posted in a chat  [user mode]
+- sticker_sets: The packs installed on the account  [user mode]
+- stickers (sticker_set): The stickers in one pack, with their emoji
+- gifs (-> limit=20): The account's saved GIFs  [user mode]`
 
-const contactDescription = `Manage contacts: list, search, add, and block/unblock users (user mode only).
+const contactDescription = `Manage the address book, and teach the server what you call people.
 
-Actions:
-- list: Show all contacts
+Actions (user mode unless noted):
+- list: Every contact
 - search (query): Find contacts by name
 - add (phone, first_name -> last_name)
-- block (user_id -> unblock=true)`
+- delete (user_id): Remove the contact entry; the conversation stays
+- import (contacts): Rows of {phone, first_name, last_name}; reports which
+  numbers had no Telegram account behind them
+- export: The whole address book
+- block (user_id -> unblock=true)
+- blocked (-> limit=50): Who is blocked
+- last_seen (user_id): Their status and the last message either way
+- send_card (chat_id, user_id): Share someone's contact card
+- direct (query): The one-to-one chat with a person, by any reference
+
+Aliases -- the local map from the words you use to a Telegram id. This is how
+a name like "андрей бекендер" resolves in every other tool. When a reference
+cannot be resolved, ask the user who that is, save the answer here, and retry.
+Works in both modes; the file never reaches Telegram.
+- alias_set (alias, chat_id -> replace): Remember this wording for that chat.
+  replace is required to repoint an alias that already names someone else.
+- alias_list: Every saved alias
+- alias_delete (alias)`
 
 const configDescription = `Server configuration and runtime settings.
 

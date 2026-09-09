@@ -23,6 +23,11 @@ var folderActions = []string{
 
 // HandleFolder dispatches one call of the `folder` tool.
 func HandleFolder(ctx context.Context, backend telegram.Backend, args FolderArgs) Result {
+	// A mistyped action is a caller error and must read as one; asking the
+	// backend first would report it as a mode problem.
+	if !contains(folderActions, args.Action) {
+		return unknownAction(args.Action, folderActions)
+	}
 	folders, err := telegram.Folders(backend)
 	if err != nil {
 		return SafeError(err)

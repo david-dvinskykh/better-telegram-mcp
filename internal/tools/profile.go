@@ -31,6 +31,11 @@ var profileActions = []string{
 
 // HandleProfile dispatches one call of the `profile` tool.
 func HandleProfile(ctx context.Context, backend telegram.Backend, args ProfileArgs) Result {
+	// A mistyped action is a caller error and must read as one; asking the
+	// backend first would report "sned" as a mode problem.
+	if !contains(profileActions, args.Action) {
+		return unknownAction(args.Action, profileActions)
+	}
 	profile, err := telegram.Profile(backend)
 	if err != nil {
 		return SafeError(err)

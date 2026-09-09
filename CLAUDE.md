@@ -3,11 +3,17 @@
 MCP Server cho Telegram. Python 3.13, uv, hatchling, src layout.
 Dual-mode: Bot API (httpx) + MTProto (Telethon). 7 tools: message, chat, media, contact, config, help, config__open_relay.
 
-A stdio-only Go rewrite of the same seven tools lives alongside the Python one
-in `cmd/` + `internal/` — build, auth, layout and the differences are in
-[GO.md](GO.md). It is a second implementation, not a replacement: the Python
-server still owns HTTP mode, the OAuth AS and multi-user. Changes to tool
-behaviour belong in both.
+A stdio-only Go server lives alongside the Python one in `cmd/` + `internal/` —
+build, auth, layout and the differences are in [GO.md](GO.md). It started as a
+rewrite of the same seven tools and is now where the two Telegram projects
+meet: it connects as a bot *and* as a user by phone, and carries the
+user-account surface of `telegram-mcp` folded into those tools as actions,
+plus `profile` and `folder`. It also keeps a local alias map from the words a
+person uses for someone to the id behind them.
+
+It is not a replacement for the Python server, which still owns HTTP mode, the
+OAuth AS and multi-user. A change to behaviour the Python server also has
+belongs in both; the actions only the Go server has are Go-only.
 
 ## Commands
 
@@ -79,6 +85,9 @@ Session persist: `~/.better-telegram-mcp/<name>.session`, permission 600.
 - `TELEGRAM_RESUME_MAP_FILE` -- optional; `message_id -> Claude session` map
   written by `send(resume_session=...)`, echoed back as `session_id` on each
   press so the asking session can be continued
+- `TELEGRAM_ALIASES_FILE` -- optional (Go server); the local map from a
+  person's own wording for a contact to the id behind it, default
+  `<data dir>/aliases.json`
 - `MCP_TRANSPORT` / `TRANSPORT_MODE` -- set to `http` to opt into HTTP mode (default wire transport is stdio); `--http` CLI flag does the same
 - `PUBLIC_URL` -- deployed hostname; presence flips on the multi-user OAuth branch (with the DCR secret + api_id/api_hash)
 - `MCP_DCR_SERVER_SECRET` -- multi-user remote OAuth shared secret (with `PUBLIC_URL`); legacy `DCR_SERVER_SECRET` still accepted

@@ -16,7 +16,7 @@ const MaxAnswerText = 200
 // subset; the required ones are checked per action so the error names exactly
 // what is missing.
 type MessageArgs struct {
-	Action    string `json:"action" jsonschema:"send|edit|delete|forward|pin|react|search|history|callbacks|answer"`
+	Action    string `json:"action" jsonschema:"send|edit|delete|delete_bulk|purge|forward|forward_bulk|pin|unpin|unpin_all|pinned|react|reactions|read|search|history|context|link|poll|draft_save|draft_list|schedule|schedule_list|schedule_cancel|callbacks|answer"`
 	ChatID    any    `json:"chat_id,omitempty" jsonschema:"chat id or @username"`
 	Text      string `json:"text,omitempty"`
 	MessageID int    `json:"message_id,omitempty"`
@@ -33,6 +33,22 @@ type MessageArgs struct {
 	Query    string `json:"query,omitempty"`
 	Limit    int    `json:"limit,omitempty"`
 	OffsetID int    `json:"offset_id,omitempty"`
+
+	// Bulk and window actions
+	MessageIDs []int `json:"message_ids,omitempty" jsonschema:"message ids for delete_bulk, forward_bulk and schedule_cancel"`
+	Around     int   `json:"around,omitempty" jsonschema:"messages to show either side of message_id in context (default 5)"`
+	Revoke     bool  `json:"revoke,omitempty" jsonschema:"purge for everyone, not just this account -- irreversible"`
+
+	// Polls
+	Question       string   `json:"question,omitempty"`
+	Options        []string `json:"options,omitempty" jsonschema:"2 to 10 poll answers"`
+	MultipleChoice bool     `json:"multiple_choice,omitempty"`
+	Anonymous      *bool    `json:"anonymous,omitempty" jsonschema:"hide who voted; defaults to true"`
+	Quiz           bool     `json:"quiz,omitempty"`
+	CloseAt        string   `json:"close_at,omitempty" jsonschema:"RFC3339 time the poll closes"`
+
+	// Scheduling
+	SendAt string `json:"send_at,omitempty" jsonschema:"RFC3339 time to send the message"`
 
 	// Inline buttons and callback queries (bot mode)
 	Buttons         []any   `json:"buttons,omitempty" jsonschema:"rows of {text, data} callback buttons"`
@@ -59,8 +75,12 @@ func (a MessageArgs) autoAnswer() bool {
 }
 
 var messageActions = []string{
-	"send", "edit", "delete", "forward", "pin", "react",
-	"search", "history", "callbacks", "answer",
+	"send", "edit", "delete", "delete_bulk", "purge",
+	"forward", "forward_bulk", "pin", "unpin", "unpin_all", "pinned",
+	"react", "reactions", "read", "search", "history", "context", "link",
+	"poll", "draft_save", "draft_list",
+	"schedule", "schedule_list", "schedule_cancel",
+	"callbacks", "answer",
 }
 
 // HandleMessage dispatches one call of the `message` tool.
@@ -87,8 +107,209 @@ func HandleMessage(ctx context.Context, backend telegram.Backend, args MessageAr
 	case "answer":
 		return handleAnswer(ctx, backend, args)
 	default:
+		return handleMessageExtra(ctx, backend, args)
+	}
+}
+
+// handleMessageExtra dispatches the actions that need a capability beyond the
+// core Backend, so the switch above stays the shape it had.
+func handleMessageExtra(ctx context.Context, backend telegram.Backend, args MessageArgs) Result {
+	// A mistyped action is a caller error and must be reported as one, so the
+	// action is checked before the backend is asked whether it can serve it --
+	// otherwise "sned" would come back as a mode problem.
+	if !contains(messageActions, args.Action) {
 		return unknownAction(args.Action, messageActions)
 	}
+	extras, err := telegram.Messages(backend)
+	if err != nil {
+		return SafeError(err)
+	}
+
+	switch args.Action {
+	case "unpin":
+		if isEmpty(args.ChatID) || args.MessageID == 0 {
+			return Err("'unpin' requires chat_id and message_id")
+		}
+		unpinned, err := extras.UnpinMessage(ctx, args.ChatID, args.MessageID)
+		if err != nil {
+			return SafeError(err)
+		}
+		return Ok(Result{"unpinned": unpinned})
+
+	case "unpin_all":
+		if isEmpty(args.ChatID) {
+			return Err("'unpin_all' requires chat_id")
+		}
+		unpinned, err := extras.UnpinAllMessages(ctx, args.ChatID)
+		if err != nil {
+			return SafeError(err)
+		}
+		return Ok(Result{"unpinned_all": unpinned})
+
+	case "pinned":
+		if isEmpty(args.ChatID) {
+			return Err("'pinned' requires chat_id")
+		}
+		messages, err := extras.ListPinned(ctx, args.ChatID, args.Limit)
+		if err != nil {
+			return SafeError(err)
+		}
+		return Ok(Result{"messages": messages, "count": len(messages)})
+
+	case "read":
+		if isEmpty(args.ChatID) {
+			return Err("'read' requires chat_id")
+		}
+		read, err := extras.MarkRead(ctx, args.ChatID, args.MessageID)
+		if err != nil {
+			return SafeError(err)
+		}
+		return Ok(Result{"marked_read": read})
+
+	case "context":
+		if isEmpty(args.ChatID) || args.MessageID == 0 {
+			return Err("'context' requires chat_id and message_id")
+		}
+		messages, err := extras.MessageContext(ctx, args.ChatID, args.MessageID, args.Around)
+		if err != nil {
+			return SafeError(err)
+		}
+		return Ok(Result{"messages": messages, "count": len(messages)})
+
+	case "link":
+		if isEmpty(args.ChatID) || args.MessageID == 0 {
+			return Err("'link' requires chat_id and message_id")
+		}
+		link, err := extras.MessageLink(ctx, args.ChatID, args.MessageID)
+		if err != nil {
+			return SafeError(err)
+		}
+		return Ok(link)
+
+	case "reactions":
+		if isEmpty(args.ChatID) || args.MessageID == 0 {
+			return Err("'reactions' requires chat_id and message_id")
+		}
+		reactions, err := extras.ListReactions(ctx, args.ChatID, args.MessageID, args.Limit)
+		if err != nil {
+			return SafeError(err)
+		}
+		return Ok(Result{"reactions": reactions, "count": len(reactions)})
+
+	case "delete_bulk":
+		if isEmpty(args.ChatID) || len(args.MessageIDs) == 0 {
+			return Err("'delete_bulk' requires chat_id and message_ids")
+		}
+		deleted, err := extras.DeleteMessages(ctx, args.ChatID, args.MessageIDs)
+		if err != nil {
+			return SafeError(err)
+		}
+		return Ok(Result{"deleted": deleted, "requested": len(args.MessageIDs)})
+
+	case "purge":
+		if isEmpty(args.ChatID) {
+			return Err("'purge' requires chat_id")
+		}
+		purged, err := extras.PurgeHistory(ctx, args.ChatID, args.Revoke)
+		if err != nil {
+			return SafeError(err)
+		}
+		return Ok(purged)
+
+	case "forward_bulk":
+		if isEmpty(args.FromChat) || isEmpty(args.ToChat) || len(args.MessageIDs) == 0 {
+			return Err("'forward_bulk' requires from_chat, to_chat and message_ids")
+		}
+		messages, err := extras.ForwardMessages(ctx, args.FromChat, args.ToChat, args.MessageIDs)
+		if err != nil {
+			return SafeError(err)
+		}
+		return Ok(Result{"messages": messages, "count": len(messages)})
+
+	case "poll":
+		return handlePoll(ctx, extras, args)
+
+	case "draft_save":
+		if isEmpty(args.ChatID) {
+			return Err("'draft_save' requires chat_id; an empty text clears the draft")
+		}
+		saved, err := extras.SaveDraft(ctx, args.ChatID, args.Text)
+		if err != nil {
+			return SafeError(err)
+		}
+		return Ok(Result{"saved": saved, "cleared": args.Text == ""})
+
+	case "draft_list":
+		drafts, err := extras.ListDrafts(ctx)
+		if err != nil {
+			return SafeError(err)
+		}
+		return Ok(Result{"drafts": drafts, "count": len(drafts)})
+
+	case "schedule":
+		if isEmpty(args.ChatID) || args.Text == "" || args.SendAt == "" {
+			return Err("'schedule' requires chat_id, text and send_at (RFC3339)")
+		}
+		at, err := time.Parse(time.RFC3339, args.SendAt)
+		if err != nil {
+			return Err("send_at must be an RFC3339 time such as 2026-01-31T09:00:00Z, got %q", args.SendAt)
+		}
+		scheduled, err := extras.ScheduleMessage(ctx, args.ChatID, args.Text, at)
+		if err != nil {
+			return SafeError(err)
+		}
+		return Ok(scheduled)
+
+	case "schedule_list":
+		if isEmpty(args.ChatID) {
+			return Err("'schedule_list' requires chat_id")
+		}
+		messages, err := extras.ListScheduled(ctx, args.ChatID)
+		if err != nil {
+			return SafeError(err)
+		}
+		return Ok(Result{"messages": messages, "count": len(messages)})
+
+	case "schedule_cancel":
+		if isEmpty(args.ChatID) || len(args.MessageIDs) == 0 {
+			return Err("'schedule_cancel' requires chat_id and message_ids")
+		}
+		cancelled, err := extras.CancelScheduled(ctx, args.ChatID, args.MessageIDs)
+		if err != nil {
+			return SafeError(err)
+		}
+		return Ok(Result{"cancelled": cancelled, "count": len(args.MessageIDs)})
+
+	default:
+		return unknownAction(args.Action, messageActions)
+	}
+}
+
+// handlePoll is split out because a poll has more of its own arguments than
+// every other action put together.
+func handlePoll(ctx context.Context, extras telegram.MessageExtras, args MessageArgs) Result {
+	if isEmpty(args.ChatID) || args.Question == "" || len(args.Options) < 2 {
+		return Err("'poll' requires chat_id, question and at least 2 options")
+	}
+	opts := telegram.PollOptions{
+		MultipleChoice: args.MultipleChoice,
+		// A poll is anonymous unless the caller says otherwise, which is what
+		// Telegram's own compose screen defaults to.
+		Anonymous: args.Anonymous == nil || *args.Anonymous,
+		Quiz:      args.Quiz,
+	}
+	if args.CloseAt != "" {
+		at, err := time.Parse(time.RFC3339, args.CloseAt)
+		if err != nil {
+			return Err("close_at must be an RFC3339 time such as 2026-01-31T09:00:00Z, got %q", args.CloseAt)
+		}
+		opts.CloseAt = at
+	}
+	poll, err := extras.SendPoll(ctx, args.ChatID, args.Question, args.Options, opts)
+	if err != nil {
+		return SafeError(err)
+	}
+	return Ok(poll)
 }
 
 func handleSend(ctx context.Context, backend telegram.Backend, args MessageArgs) Result {

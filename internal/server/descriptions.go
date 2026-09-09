@@ -4,21 +4,41 @@ package server
 // they carry the full action list with each action's required and optional
 // arguments rather than a one-line summary.
 
-const messageDescription = `Send, edit, delete, forward, pin, react, search, browse history, and
-ask a question with inline buttons + read the presses.
+const messageDescription = `Send, edit, delete, forward, pin, react, search, browse history, run
+polls, keep drafts and schedule messages, and ask a question with inline
+buttons + read the presses.
 
-Actions (chat_id: "@username" | int):
+Actions (chat_id: "@username" | int | a saved alias):
 - send (chat_id, text -> reply_to, parse_mode, buttons, resume_session)
 - edit (chat_id, message_id, text and/or buttons -> parse_mode)
 - delete (chat_id, message_id)
+- delete_bulk (chat_id, message_ids)
+- purge (chat_id -> revoke): Clear the whole conversation. revoke=true also
+  removes it for the other side and cannot be undone.
 - forward (from_chat, to_chat, message_id)
+- forward_bulk (from_chat, to_chat, message_ids)
 - pin (chat_id, message_id)
+- unpin (chat_id, message_id)
+- unpin_all (chat_id)
+- pinned (chat_id -> limit=20)
 - react (chat_id, message_id, emoji)
-- search (query -> chat_id, limit=20)
+- reactions (chat_id, message_id -> limit=50): Who reacted, and with what  [user mode]
+- read (chat_id -> message_id): Mark read up to a message, or the whole chat  [user mode]
+- search (query -> chat_id, limit=20): Omit chat_id to search every chat
 - history (chat_id -> limit=20, offset_id)
+- context (chat_id, message_id -> around=5): The messages either side of one  [user mode]
+- link (chat_id, message_id): The t.me link to a message
+- poll (chat_id, question, options -> multiple_choice, anonymous, close_at)
+- draft_save (chat_id -> text): Store unsent text; empty text clears it  [user mode]
+- draft_list: Every chat with unsent text in it  [user mode]
+- schedule (chat_id, text, send_at): Queue a message for later  [user mode]
+- schedule_list (chat_id)  [user mode]
+- schedule_cancel (chat_id, message_ids)  [user mode]
 - callbacks (-> since_id, limit=20, auto_answer, answer_text,
   allowed_from_ids, data_pattern, peek, message_id)  [bot mode]
 - answer (callback_query_id -> answer_text, show_alert)  [bot mode]
+
+Times (send_at, close_at) are RFC3339, e.g. 2026-01-31T09:00:00Z.
 
 Inline buttons (bot mode only) are rows of callback buttons:
 buttons=[[{"text": "Yes", "data": "DEC-12:yes"},

@@ -47,7 +47,6 @@ type MessageExtras interface {
 	ListPinned(ctx context.Context, chatID any, limit int) ([]Map, error)
 	MessageContext(ctx context.Context, chatID any, messageID, around int) ([]Map, error)
 	MessageLink(ctx context.Context, chatID any, messageID int) (Map, error)
-	SearchGlobal(ctx context.Context, query string, limit int) ([]Map, error)
 	ListReactions(ctx context.Context, chatID any, messageID, limit int) ([]Map, error)
 	DeleteMessages(ctx context.Context, chatID any, ids []int) (int, error)
 	PurgeHistory(ctx context.Context, chatID any, revoke bool) (Map, error)
@@ -111,7 +110,8 @@ type PollOptions struct {
 	MultipleChoice bool
 	Anonymous      bool
 	Quiz           bool
-	CorrectOption  int
+	// CloseAt closes the poll automatically. The zero time leaves it open.
+	CloseAt time.Time
 }
 
 // ContactEntry is one row of a bulk contact import.

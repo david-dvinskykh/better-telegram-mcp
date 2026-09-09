@@ -122,3 +122,13 @@ func matchingRunes(a, b []rune) int {
 		matchingRunes(a[:bestA], b[:bestB]) +
 		matchingRunes(a[bestA+bestLen:], b[bestB+bestLen:])
 }
+
+// contains reports whether a value is one of the listed ones.
+func contains(values []string, value string) bool {
+	for _, item := range values {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}

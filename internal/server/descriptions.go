@@ -60,18 +60,38 @@ one (answerCallbackQuery) unless auto_answer=false.
 pending for whoever acts on them, and nothing is answered. That is what a
 watcher polls, optionally narrowed to one question with message_id.`
 
-const chatDescription = `List, create, join, leave, manage members, settings, and topics.
+const chatDescription = `List, look up, create, join and leave chats; moderate the ones you
+administer; and manage how they appear in your own chat list.
 
-Actions:
+Actions (chat_id: "@username" | int | a saved alias):
 - list (-> limit=50)
-- info (chat_id)
+- info (chat_id): The short record -- id, title, username
+- full (chat_id): Description, member and admin counts, pinned message
 - create (title -> is_channel)
 - join (link_or_hash)
 - leave (chat_id)
+- invite (chat_id, user_ids)  [user mode]
 - members (chat_id -> limit=50)
-- admin (chat_id, user_id -> demote)
+- admins (chat_id -> limit=50)
+- banned (chat_id -> limit=50)  [user mode]
+- admin (chat_id, user_id -> demote): Promote or demote
+- ban (chat_id, user_id -> unban)
+- permissions (chat_id, permissions): What ordinary members may do. The map is
+  the whole rule, not a patch: anything not named is granted. Keys:
+  send_messages, send_media, send_stickers, send_gifs, send_polls, embed_links,
+  change_info, invite_users, pin_messages, manage_topics
+- slow_mode (chat_id, seconds): 0 turns it off  [user mode]
 - settings (chat_id, title|description)
-- topics (chat_id, topic_action -> topic_id, topic_name)`
+- photo (chat_id -> path): Set the picture; an empty path removes it
+- topics (chat_id, topic_action -> topic_id, topic_name)
+- recent_actions (chat_id -> limit=50): The administrative log  [user mode]
+- invite_link (chat_id -> revoke): The primary link; revoke replaces it
+- read_by (chat_id, message_id): Who has read it, in small groups  [user mode]
+- mute (chat_id -> mute=false to unmute)  [user mode]
+- archive (chat_id -> archive=false to unarchive)  [user mode]
+- resolve (username): What a @name points at, without joining it  [user mode]
+- search_public (query -> limit=20): The public directory  [user mode]
+- common (user_id -> limit=50): Chats shared with someone  [user mode]`
 
 const mediaDescription = `Send photos, files, voice, video, and download media from messages.
 

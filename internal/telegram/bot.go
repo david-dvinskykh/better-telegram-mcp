@@ -154,6 +154,9 @@ func (b *BotBackend) callForm(
 		if value == nil {
 			continue
 		}
+		if key == "chat_id" || key == "from_chat_id" {
+			value = b.applyAlias(value)
+		}
 		if err := writer.WriteField(key, fmt.Sprint(value)); err != nil {
 			return nil, err
 		}
@@ -749,38 +752,48 @@ func (b *BotBackend) SendMedia(ctx context.Context, chatID any, mediaType, pathO
 	}
 	params := Map{"chat_id": chatID, "caption": optionalString(caption)}
 
+	filename, content, err := readUpload(pathOrURL)
+	if err != nil {
+		return nil, err
+	}
+	return b.decodeForm(b.callForm(ctx, method, mediaType, filename, content, params))
+}
+
+// readUpload turns a local path or an http(s) URL into the bytes to post,
+// through the same security checks either way.
+func readUpload(pathOrURL string) (string, []byte, error) {
 	trimmed := strings.TrimSpace(pathOrURL)
 	if isHTTPURL(trimmed) {
 		content, err := security.FetchURL(trimmed, 30*time.Second)
 		if err != nil {
-			return nil, err
+			return "", nil, err
 		}
 		filename := filepath.Base(trimmed)
 		if filename == "" || filename == "." || filename == "/" {
 			filename = "file"
 		}
-		return b.decodeForm(b.callForm(ctx, method, mediaType, filename, content, params))
+		return filename, content, nil
 	}
 
 	path, err := security.ValidateFilePath(pathOrURL)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	info, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("File not found: %s", pathOrURL)
+		return "", nil, fmt.Errorf("File not found: %s", pathOrURL)
 	}
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	if info.Size() > maxFileBytes {
-		return nil, fmt.Errorf("File size exceeds maximum allowed (%d bytes)", maxFileBytes)
+		return "", nil, fmt.Errorf("File size exceeds maximum allowed (%d bytes)", maxFileBytes)
 	}
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	return b.decodeForm(b.callForm(ctx, method, mediaType, filepath.Base(path), content, params))
+	return filepath.Base(path), content, nil
 }
 
 func (b *BotBackend) decodeForm(raw json.RawMessage, err error) (Map, error) {

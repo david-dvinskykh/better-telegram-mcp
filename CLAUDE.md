@@ -3,6 +3,12 @@
 MCP Server cho Telegram. Python 3.13, uv, hatchling, src layout.
 Dual-mode: Bot API (httpx) + MTProto (Telethon). 7 tools: message, chat, media, contact, config, help, config__open_relay.
 
+A stdio-only Go rewrite of the same seven tools lives alongside the Python one
+in `cmd/` + `internal/` — build, auth, layout and the differences are in
+[GO.md](GO.md). It is a second implementation, not a replacement: the Python
+server still owns HTTP mode, the OAuth AS and multi-user. Changes to tool
+behaviour belong in both.
+
 ## Commands
 
 ```bash

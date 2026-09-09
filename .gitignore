@@ -97,3 +97,6 @@ htmlcov/
 *.bak
 /*.patch
 /*.diff
+
+# Go build output (the binary is built from ./cmd/better-telegram-mcp) — 2026-09-09
+/better-telegram-mcp

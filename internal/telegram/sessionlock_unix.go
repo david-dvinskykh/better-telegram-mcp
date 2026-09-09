@@ -1,0 +1,82 @@
+//go:build unix
+
+package telegram
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"syscall"
+)
+
+// sessionLock is a whole-process claim on one MTProto session file.
+//
+// Two clients running on the same auth key is not a file-corruption problem
+// that a retry fixes: Telegram invalidates the key when it sees the same
+// session from two connections, and every call after that fails. So the second
+// process has to be refused at startup, loudly, instead of quietly fighting for
+// the session.
+//
+// The claim is a kernel advisory lock (flock), not a PID file. That is the
+// whole point: the kernel drops the lock when the holder exits for any reason,
+// including a kill -9 or a container stop, so a crash can never leave a stale
+// lock that has to be deleted by hand.
+type sessionLock struct {
+	file *os.File
+	path string
+}
+
+// acquireSessionLock claims the session, or reports who holds it.
+func acquireSessionLock(sessionPath string) (*sessionLock, error) {
+	path := sessionPath + ".lock"
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("cannot open the session lock at %s: %w", path, err)
+	}
+
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		holder := readLockHolder(file)
+		_ = file.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, &SessionBusyError{
+				SessionPath: sessionPath,
+				LockPath:    path,
+				HolderPID:   holder,
+			}
+		}
+		return nil, fmt.Errorf("cannot lock the session at %s: %w", path, err)
+	}
+
+	// Record who holds it, purely so the next process can name the culprit.
+	if err := file.Truncate(0); err == nil {
+		_, _ = file.WriteAt([]byte(strconv.Itoa(os.Getpid())), 0)
+		_ = file.Sync()
+	}
+	return &sessionLock{file: file, path: path}, nil
+}
+
+// release drops the claim. The lock file itself is left in place: unlinking it
+// would race another process that has already opened it and is about to lock.
+func (l *sessionLock) release() {
+	if l == nil || l.file == nil {
+		return
+	}
+	_ = syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN)
+	_ = l.file.Close()
+	l.file = nil
+}
+
+func readLockHolder(file *os.File) int {
+	buf := make([]byte, 32)
+	n, err := file.ReadAt(buf, 0)
+	if n == 0 || (err != nil && n == 0) {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(buf[:n])))
+	if err != nil {
+		return 0
+	}
+	return pid
+}

@@ -180,6 +180,53 @@ func (b *BotBackend) callForm(
 	return b.do(req)
 }
 
+// uploadedFile is one attachment of a multi-file form.
+type uploadedFile struct {
+	Field    string
+	Filename string
+	Content  []byte
+}
+
+// callFormFiles posts a Bot API method with several attachments at once, which
+// is what sendMediaGroup needs: the media array references each part by the
+// field name it was uploaded under.
+func (b *BotBackend) callFormFiles(
+	ctx context.Context, method string, files []uploadedFile, params Map,
+) (json.RawMessage, error) {
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	for key, value := range params {
+		if value == nil {
+			continue
+		}
+		if key == "chat_id" || key == "from_chat_id" {
+			value = b.applyAlias(value)
+		}
+		if err := writer.WriteField(key, fmt.Sprint(value)); err != nil {
+			return nil, err
+		}
+	}
+	for _, file := range files {
+		part, err := writer.CreateFormFile(file.Field, file.Filename)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := part.Write(file.Content); err != nil {
+			return nil, err
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, b.baseURL+method, &buf)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return b.do(req)
+}
+
 func (b *BotBackend) do(req *http.Request) (json.RawMessage, error) {
 	resp, err := b.client.Do(req)
 	if err != nil {

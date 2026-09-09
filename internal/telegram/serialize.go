@@ -17,8 +17,11 @@ func serializeMessage(msg *tg.Message) Map {
 		"message_id": msg.ID,
 		"text":       msg.Message,
 		"date":       nil,
-		"sender_id":  nil,
-		"topic_id":   nil,
+		// chat_id is what a caller passes to every follow-up action. Without it
+		// a hit from a search across all chats names no chat to act on.
+		"chat_id":   peerID(msg.PeerID),
+		"sender_id": nil,
+		"topic_id":  nil,
 	}
 	if msg.Date != 0 {
 		out["date"] = time.Unix(int64(msg.Date), 0).UTC().Format(time.RFC3339)
@@ -153,6 +156,7 @@ func firstMessage(updates tg.UpdatesClass) Map {
 			"message_id": short.ID,
 			"text":       "",
 			"date":       time.Unix(int64(short.Date), 0).UTC().Format(time.RFC3339),
+			"chat_id":    nil,
 			"sender_id":  nil,
 			"topic_id":   nil,
 		}

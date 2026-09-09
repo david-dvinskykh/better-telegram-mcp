@@ -173,6 +173,8 @@ func (u *UserBackend) GetUserInfo(ctx context.Context, user any) (Map, error) {
 		return nil, err
 	}
 
+	u.rememberPeers(ctx, full.Users, full.Chats)
+
 	out := Map{}
 	for _, item := range full.Users {
 		if typed, ok := item.(*tg.User); ok && typed.ID == full.FullUser.ID {

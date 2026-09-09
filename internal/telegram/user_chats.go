@@ -79,6 +79,8 @@ func (u *UserBackend) ResolveUsername(ctx context.Context, username string) (Map
 	if err != nil {
 		return nil, err
 	}
+	u.rememberPeers(ctx, resolved.Users, resolved.Chats)
+
 	out := Map{"username": name, "id": peerID(resolved.Peer)}
 	for _, item := range resolved.Users {
 		if user, ok := item.(*tg.User); ok && user.ID == peerID(resolved.Peer) {
@@ -122,6 +124,8 @@ func (u *UserBackend) SearchPublic(ctx context.Context, query string, limit int)
 	if err != nil {
 		return nil, err
 	}
+
+	u.rememberPeers(ctx, found.Users, found.Chats)
 
 	out := []Map{}
 	for _, item := range found.Users {
@@ -249,6 +253,8 @@ func (u *UserBackend) CommonChats(ctx context.Context, userID int64, limit int) 
 	if err != nil {
 		return nil, err
 	}
+
+	u.rememberPeers(ctx, nil, chatsOf(result))
 
 	out := []Map{}
 	for _, item := range chatsOf(result) {
@@ -539,6 +545,7 @@ func (u *UserBackend) listParticipants(ctx context.Context, chatID any, filter t
 	if !ok {
 		return []Map{}, nil
 	}
+	u.rememberPeers(ctx, participants.Users, participants.Chats)
 	return serializeUsers(participants.Users), nil
 }
 
@@ -560,6 +567,8 @@ func (u *UserBackend) RecentActions(ctx context.Context, chatID any, limit int) 
 	if err != nil {
 		return nil, err
 	}
+
+	u.rememberPeers(ctx, log.Users, log.Chats)
 
 	names := map[int64]string{}
 	for _, item := range log.Users {
@@ -667,4 +676,10 @@ func inviteHash(link string) string {
 		return trimmed
 	}
 	return ""
+}
+
+// knownPermission reports whether a name is one SetPermissions understands.
+func knownPermission(name string) bool {
+	_, ok := permissionFlags[name]
+	return ok
 }

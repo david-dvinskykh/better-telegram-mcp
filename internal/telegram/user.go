@@ -47,6 +47,9 @@ type UserBackend struct {
 
 	aliases *aliases.Store
 
+	// Peer access hashes are cached per process; see peercache.go.
+	sweepState
+
 	lock    *sessionLock
 	stop    context.CancelFunc
 	done    chan struct{}
@@ -404,7 +407,19 @@ func (u *UserBackend) resolvePeer(ctx context.Context, chatID any) (tg.InputPeer
 	}
 }
 
+// resolveNumeric turns a Bot-API-shaped id into an input peer. A first miss is
+// not final: the id may simply not be in this process's peer cache yet, so the
+// account's dialogs are swept in and the lookup retried once.
 func (u *UserBackend) resolveNumeric(ctx context.Context, id int64) (tg.InputPeerClass, error) {
+	peer, err := u.lookupNumeric(ctx, id)
+	if err == nil {
+		return peer, nil
+	}
+	u.sweepPeers(ctx)
+	return u.lookupNumeric(ctx, id)
+}
+
+func (u *UserBackend) lookupNumeric(ctx context.Context, id int64) (tg.InputPeerClass, error) {
 	switch {
 	case id > 0:
 		user, err := u.peers.ResolveUserID(ctx, id)
@@ -441,12 +456,11 @@ func (u *UserBackend) inputChannel(ctx context.Context, chatID any) (tg.InputCha
 	return &tg.InputChannel{ChannelID: channel.ChannelID, AccessHash: channel.AccessHash}, nil
 }
 
+// inputUser resolves a numeric user id through the same path chat_id takes, so
+// a bot or a person this process has not seen yet is swept into the peer cache
+// rather than refused for a missing access hash.
 func (u *UserBackend) inputUser(ctx context.Context, userID int64) (tg.InputUserClass, error) {
-	user, err := u.peers.ResolveUserID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	return user.InputUser(), nil
+	return u.inputUserOf(ctx, userID)
 }
 
 // --- messages ---
@@ -565,7 +579,7 @@ func (u *UserBackend) SearchMessages(ctx context.Context, query string, chatID a
 	if err != nil {
 		return nil, err
 	}
-	limit = clamp(limit, 1, 100)
+	limit = limitOr(limit, 20, 100)
 
 	if chatID == nil {
 		result, err := api.MessagesSearchGlobal(ctx, &tg.MessagesSearchGlobalRequest{
@@ -607,7 +621,7 @@ func (u *UserBackend) GetHistory(ctx context.Context, chatID any, limit, offsetI
 	}
 	result, err := api.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
 		Peer:     peer,
-		Limit:    clamp(limit, 1, 100),
+		Limit:    limitOr(limit, 20, 100),
 		OffsetID: offsetID,
 	})
 	if err != nil {
@@ -647,7 +661,7 @@ func (u *UserBackend) ListChats(ctx context.Context, limit int) ([]Map, error) {
 	}
 	result, err := api.MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
 		OffsetPeer: &tg.InputPeerEmpty{},
-		Limit:      clamp(limit, 1, 100),
+		Limit:      limitOr(limit, 50, 100),
 	})
 	if err != nil {
 		return nil, err
@@ -664,6 +678,10 @@ func (u *UserBackend) ListChats(ctx context.Context, limit int) ([]Map, error) {
 	default:
 		return []Map{}, nil
 	}
+
+	// The ids below are what a caller passes back to every other action, so the
+	// access hashes that came with them have to be kept.
+	u.rememberPeers(ctx, users, chats)
 
 	titles := titleIndex(users, chats)
 	out := make([]Map, 0, len(dialogs))
@@ -699,12 +717,29 @@ func (u *UserBackend) GetChatInfo(ctx context.Context, chatID any) (Map, error) 
 	switch typed := peer.(type) {
 	case peers.User:
 		raw := typed.Raw()
+		info["type"] = "user"
 		if raw != nil {
 			info["first_name"] = raw.FirstName
 			info["last_name"] = raw.LastName
 			info["username"] = emptyToNil(raw.Username)
+			// A conversation with a bot behaves differently enough -- no read
+			// receipts, no reactions from the other side -- that the caller
+			// should be told which kind of chat this is.
+			if raw.Bot {
+				info["type"] = "bot"
+			}
+		}
+	case peers.Channel:
+		info["type"] = "channel"
+		if typed.IsSupergroup() {
+			info["type"] = "supergroup"
+		}
+		info["title"] = peer.VisibleName()
+		if username, ok := peer.Username(); ok {
+			info["username"] = username
 		}
 	default:
+		info["type"] = "group"
 		info["title"] = peer.VisibleName()
 		if username, ok := peer.Username(); ok {
 			info["username"] = username
@@ -804,7 +839,7 @@ func (u *UserBackend) GetMembers(ctx context.Context, chatID any, limit int) ([]
 	result, err := api.ChannelsGetParticipants(ctx, &tg.ChannelsGetParticipantsRequest{
 		Channel: channel,
 		Filter:  &tg.ChannelParticipantsRecent{},
-		Limit:   clamp(limit, 1, 200),
+		Limit:   limitOr(limit, 50, 200),
 		Hash:    0,
 	})
 	if err != nil {
@@ -814,6 +849,7 @@ func (u *UserBackend) GetMembers(ctx context.Context, chatID any, limit int) ([]
 	if !ok {
 		return []Map{}, nil
 	}
+	u.rememberPeers(ctx, participants.Users, participants.Chats)
 	out := make([]Map, 0, len(participants.Users))
 	for _, user := range participants.Users {
 		if typed, ok := user.(*tg.User); ok {
@@ -1114,6 +1150,7 @@ func (u *UserBackend) ListContacts(ctx context.Context) ([]Map, error) {
 	if !ok {
 		return []Map{}, nil
 	}
+	u.rememberPeers(ctx, contacts.Users, nil)
 	return serializeUsers(contacts.Users), nil
 }
 
@@ -1126,6 +1163,7 @@ func (u *UserBackend) SearchContacts(ctx context.Context, query string) ([]Map, 
 	if err != nil {
 		return nil, err
 	}
+	u.rememberPeers(ctx, found.Users, found.Chats)
 	return serializeUsers(found.Users), nil
 }
 

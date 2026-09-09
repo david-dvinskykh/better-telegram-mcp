@@ -30,32 +30,45 @@ func (b *BotBackend) SetPermissions(ctx context.Context, chatID any, permissions
 		return false, fmt.Errorf("'permissions' requires at least one of: %s",
 			strings.Join(PermissionNames(), ", "))
 	}
-	// The Bot API names its permissions differently from MTProto, so the tool's
-	// vocabulary is translated here rather than leaking into the tool.
-	botNames := map[string]string{
-		"send_messages": "can_send_messages",
-		"send_media":    "can_send_other_messages",
-		"send_stickers": "can_send_other_messages",
-		"send_gifs":     "can_send_other_messages",
-		"send_polls":    "can_send_polls",
-		"embed_links":   "can_add_web_page_previews",
-		"change_info":   "can_change_info",
-		"invite_users":  "can_invite_users",
-		"pin_messages":  "can_pin_messages",
-		"manage_topics": "can_manage_topics",
-	}
-	granted := Map{}
-	for name, allowed := range permissions {
-		key, ok := botNames[name]
-		if !ok {
+	for name := range permissions {
+		if !knownPermission(name) {
 			return false, fmt.Errorf("Unknown permission %q. Valid: %s",
 				name, strings.Join(PermissionNames(), "|"))
 		}
-		granted[key] = allowed
 	}
+
+	// Anything the caller does not name is granted: the map is the whole rule,
+	// which is the contract the tool documents.
+	granted := func(name string) bool {
+		allowed, ok := permissions[name]
+		return !ok || allowed
+	}
+
+	// The Bot API's vocabulary is not MTProto's. Stickers and GIFs share one
+	// flag there, and "media" is six. Folding them explicitly is what keeps the
+	// result deterministic -- reading the map key by key would let whichever
+	// key came last in the iteration decide the shared flag.
+	media := granted("send_media")
+	other := granted("send_stickers") && granted("send_gifs")
+
 	return b.callBool(ctx, "setChatPermissions", Map{
-		"chat_id":     chatID,
-		"permissions": granted,
+		"chat_id": chatID,
+		"permissions": Map{
+			"can_send_messages":         granted("send_messages"),
+			"can_send_audios":           media,
+			"can_send_documents":        media,
+			"can_send_photos":           media,
+			"can_send_videos":           media,
+			"can_send_video_notes":      media,
+			"can_send_voice_notes":      media,
+			"can_send_polls":            granted("send_polls"),
+			"can_send_other_messages":   other,
+			"can_add_web_page_previews": granted("embed_links"),
+			"can_change_info":           granted("change_info"),
+			"can_invite_users":          granted("invite_users"),
+			"can_pin_messages":          granted("pin_messages"),
+			"can_manage_topics":         granted("manage_topics"),
+		},
 	})
 }
 

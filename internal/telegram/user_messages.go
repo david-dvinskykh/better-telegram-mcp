@@ -156,6 +156,8 @@ func (u *UserBackend) ListReactions(ctx context.Context, chatID any, messageID, 
 		return nil, err
 	}
 
+	u.rememberPeers(ctx, result.Users, nil)
+
 	names := map[int64]string{}
 	for _, item := range result.Users {
 		if user, ok := item.(*tg.User); ok {

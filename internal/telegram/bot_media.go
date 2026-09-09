@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -17,26 +18,49 @@ func (b *BotBackend) SendAlbum(ctx context.Context, chatID any, paths []string, 
 	if len(paths) > 10 {
 		return nil, errors.New("an album holds at most 10 files")
 	}
-	// sendMediaGroup takes the files as attachments named by the media array,
-	// which the single-file form of callForm cannot express, so each file is
-	// posted through the shared upload path and grouped by Telegram in order.
-	out := make([]Map, 0, len(paths))
+
+	// sendMediaGroup takes one JSON array describing the group and the files
+	// themselves as parts it references by name. Posting them one at a time
+	// would produce separate messages, which is the thing an album is not.
+	files := make([]uploadedFile, 0, len(paths))
+	media := make([]Map, 0, len(paths))
 	for index, path := range paths {
-		itemCaption := ""
-		if index == 0 {
-			itemCaption = caption
-		}
-		kind := "document"
-		if isImageName(path) {
-			kind = "photo"
-		}
-		sent, err := b.SendMedia(ctx, chatID, kind, path, itemCaption)
+		filename, content, err := readUpload(path)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, sent)
+		field := fmt.Sprintf("file%d", index)
+		files = append(files, uploadedFile{Field: field, Filename: filename, Content: content})
+
+		item := Map{"type": "document", "media": "attach://" + field}
+		if isImageName(filename) {
+			item["type"] = "photo"
+		}
+		// Telegram shows one caption for the whole group, taken from the first
+		// item that carries one.
+		if index == 0 && caption != "" {
+			item["caption"] = caption
+		}
+		media = append(media, item)
 	}
-	return out, nil
+
+	encoded, err := json.Marshal(media)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := b.callFormFiles(ctx, "sendMediaGroup", files, Map{
+		"chat_id": chatID,
+		"media":   string(encoded),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var sent []Map
+	if err := json.Unmarshal(raw, &sent); err != nil {
+		return nil, err
+	}
+	return sent, nil
 }
 
 func (b *BotBackend) SendSticker(ctx context.Context, chatID any, opts StickerOptions) (Map, error) {

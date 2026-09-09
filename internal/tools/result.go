@@ -45,6 +45,14 @@ func SafeError(err error) Result {
 		security.IsSecurityError(err):
 		return Err("%s", err.Error())
 	}
+
+	// A refusal from Telegram is written for API clients and names nothing of
+	// this server's, so it reaches the caller as-is. Hiding it was worse than
+	// unhelpful: it turned every MTProto failure into the same sentence, with
+	// no way to tell a missing access hash from a rate limit.
+	if rpc, ok := telegram.AsRPCError(err); ok {
+		return Err("%s", rpc.Error())
+	}
 	return Err("%T: Operation failed. Check server logs for details.", err)
 }
 

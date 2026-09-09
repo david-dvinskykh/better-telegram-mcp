@@ -380,3 +380,89 @@ func TestWebhookAndPollingConflictsExplainThemselves(t *testing.T) {
 		t.Errorf("the polling conflict should point at the queue file: %s", polling)
 	}
 }
+
+// The permission map is the whole rule, and three of its keys share one Bot API
+// flag. Reading the map key by key would let whichever key came last in the
+// iteration decide that flag, so the same call could produce different chats on
+// different runs.
+func TestChatPermissionsMapDeterministically(t *testing.T) {
+	for attempt := 0; attempt < 20; attempt++ {
+		fake := newFakeBotAPI(t)
+		fake.on("setChatPermissions", true)
+		backend := fake.backend(t, BotOptions{})
+
+		if _, err := backend.SetPermissions(context.Background(), -100123, map[string]bool{
+			"send_media":    true,
+			"send_stickers": false,
+			"send_gifs":     true,
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		granted, ok := fake.callsTo("setChatPermissions")[0].Params["permissions"].(map[string]any)
+		if !ok {
+			t.Fatalf("permissions were not sent as an object: %#v",
+				fake.callsTo("setChatPermissions")[0].Params["permissions"])
+		}
+		// Stickers were refused, so the flag they share with GIFs is off.
+		if granted["can_send_other_messages"] != false {
+			t.Fatalf("attempt %d: a refused permission was granted: %#v", attempt, granted)
+		}
+		// Media maps to six flags of its own and is unaffected.
+		if granted["can_send_photos"] != true {
+			t.Fatalf("attempt %d: media should stay granted: %#v", attempt, granted)
+		}
+		// Nothing was said about polls, so they are allowed.
+		if granted["can_send_polls"] != true {
+			t.Fatalf("attempt %d: an unnamed permission should be granted: %#v", attempt, granted)
+		}
+	}
+}
+
+func TestChatPermissionsRejectAnUnknownName(t *testing.T) {
+	fake := newFakeBotAPI(t)
+	backend := fake.backend(t, BotOptions{})
+
+	_, err := backend.SetPermissions(context.Background(), -100123,
+		map[string]bool{"send_telepathy": true})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "send_messages") {
+		t.Errorf("the error should list the valid names, got %v", err)
+	}
+}
+
+// An album is one grouped message, not several messages sent quickly. Posting
+// the files one at a time is what it must not do.
+func TestAlbumIsSentAsOneMediaGroup(t *testing.T) {
+	fake := newFakeBotAPI(t)
+	fake.on("sendMediaGroup", []any{
+		map[string]any{"message_id": 1}, map[string]any{"message_id": 2},
+	})
+	backend := fake.backend(t, BotOptions{})
+
+	dir := t.TempDir()
+	var paths []string
+	for _, name := range []string{"one.jpg", "two.jpg"} {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("image"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, path)
+	}
+
+	sent, err := backend.SendAlbum(context.Background(), -100123, paths, "together")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sent) != 2 {
+		t.Errorf("expected both messages back, got %d", len(sent))
+	}
+	if calls := fake.callsTo("sendPhoto"); len(calls) != 0 {
+		t.Errorf("the files were posted separately: %d sendPhoto calls", len(calls))
+	}
+	if calls := fake.callsTo("sendMediaGroup"); len(calls) != 1 {
+		t.Fatalf("expected one sendMediaGroup call, got %d", len(calls))
+	}
+}

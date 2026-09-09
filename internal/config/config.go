@@ -49,6 +49,13 @@ type Settings struct {
 	// Where message_id -> Claude session registrations are appended.
 	ResumeMapFile string
 
+	// APIBase overrides https://api.telegram.org for bot mode. Telegram
+	// supports self-hosted Bot API servers
+	// (https://core.telegram.org/bots/api#using-a-local-bot-api-server), and
+	// pointing at one is also how this server is exercised end to end without
+	// touching the real Telegram.
+	APIBase string
+
 	Mode Mode
 }
 
@@ -64,6 +71,7 @@ func Load() (*Settings, error) {
 		CallbackDataPattern: env("TELEGRAM_CALLBACK_DATA_PATTERN"),
 		CallbackQueueFile:   env("TELEGRAM_CALLBACK_QUEUE_FILE"),
 		ResumeMapFile:       env("TELEGRAM_RESUME_MAP_FILE"),
+		APIBase:             strings.TrimRight(env("TELEGRAM_API_BASE"), "/"),
 		Mode:                ModeBot,
 	}
 

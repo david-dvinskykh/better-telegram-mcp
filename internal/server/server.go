@@ -106,6 +106,7 @@ func (s *Server) newBackend() (telegram.Backend, error) {
 			CursorPath:    s.settings.CallbackCursorPath(),
 			QueuePath:     s.settings.CallbackQueueFile,
 			ResumeMapPath: s.settings.ResumeMapFile,
+			APIBase:       s.settings.APIBase,
 		}), nil
 	}
 	return telegram.NewUserBackend(telegram.UserOptions{

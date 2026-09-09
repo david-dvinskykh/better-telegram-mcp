@@ -12,9 +12,15 @@ a home deployment behind MetaMCP actually uses.
 
 ```bash
 go build -o better-telegram-mcp ./cmd/better-telegram-mcp   # build
-go test ./...                                                # test
+go test ./...                                                # test (incl. end-to-end)
+go test -short ./...                                         # skip the binary spawn
 go vet ./... && gofmt -l cmd internal                        # lint
 ```
+
+`internal/server/e2e_test.go` is the one that mirrors deployment: it builds the
+binary, spawns it as a subprocess speaking MCP over stdin/stdout the way MetaMCP
+does, and drives it against a stub Bot API reached through `TELEGRAM_API_BASE`.
+No credentials, no network.
 
 Cross-compiling for a Raspberry Pi:
 
@@ -108,6 +114,7 @@ Unchanged from the Python server, minus the HTTP-only ones:
 | `TELEGRAM_CALLBACK_DATA_PATTERN` | regex the callback data must fully match |
 | `TELEGRAM_CALLBACK_QUEUE_FILE` | read presses from a JSONL queue instead of polling |
 | `TELEGRAM_RESUME_MAP_FILE` | `message_id -> Claude session` map for routing a press back |
+| `TELEGRAM_API_BASE` | Bot API host, default `https://api.telegram.org` — point it at a [self-hosted Bot API server](https://core.telegram.org/bots/api#using-a-local-bot-api-server), or at a stub to exercise the server without touching Telegram |
 | `CREDENTIAL_SECRET` | master secret for the credential blob |
 
 Not supported here: `MCP_TRANSPORT`, `TRANSPORT_MODE`, `--http`, `PUBLIC_URL`,

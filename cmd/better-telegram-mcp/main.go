@@ -143,7 +143,7 @@ func authBot(token string) int {
 	}
 
 	ctx := context.Background()
-	backend := telegram.NewBotBackend(token, telegram.BotOptions{})
+	backend := telegram.NewBotBackend(token, telegram.BotOptions{APIBase: settings.APIBase})
 	if err := backend.Connect(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
 		return 1

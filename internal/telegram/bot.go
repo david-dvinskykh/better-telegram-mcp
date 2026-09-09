@@ -24,8 +24,13 @@ import (
 )
 
 const (
-	apiBase     = "https://api.telegram.org/bot%s/"
-	fileAPIBase = "https://api.telegram.org/file/bot%s/"
+	// DefaultAPIBase is Telegram's own Bot API host. A self-hosted Bot API
+	// server (https://core.telegram.org/bots/api#using-a-local-bot-api-server)
+	// replaces it via BotOptions.APIBase.
+	DefaultAPIBase = "https://api.telegram.org"
+
+	apiPath  = "%s/bot%s/"
+	filePath = "%s/file/bot%s/"
 
 	// getUpdates caps limit at 100 (https://core.telegram.org/bots/api#getupdates).
 	maxUpdatesPerCall = 100
@@ -72,19 +77,27 @@ type BotBackend struct {
 }
 
 // BotOptions configures where the callback cursor, the press queue and the
-// resume map live. All three are optional.
+// resume map live, and which Bot API host to talk to. All are optional.
 type BotOptions struct {
 	CursorPath    string
 	QueuePath     string
 	ResumeMapPath string
+	// APIBase overrides DefaultAPIBase, e.g. to reach a self-hosted Bot API
+	// server. Empty means Telegram's own host.
+	APIBase string
 }
 
 // NewBotBackend builds a Bot API backend for the given token.
 func NewBotBackend(token string, opts BotOptions) *BotBackend {
+	host := opts.APIBase
+	if host == "" {
+		host = DefaultAPIBase
+	}
+	host = strings.TrimRight(host, "/")
 	return &BotBackend{
 		token:         token,
-		baseURL:       fmt.Sprintf(apiBase, token),
-		fileBaseURL:   fmt.Sprintf(fileAPIBase, token),
+		baseURL:       fmt.Sprintf(apiPath, host, token),
+		fileBaseURL:   fmt.Sprintf(filePath, host, token),
 		client:        &http.Client{Timeout: 30 * time.Second},
 		cursorPath:    opts.CursorPath,
 		queuePath:     opts.QueuePath,

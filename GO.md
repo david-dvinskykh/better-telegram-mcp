@@ -116,6 +116,45 @@ This build refuses the second process instead:
 - A connection that dies later reports gotd's own reason rather than
   "Not connected", so the next tool call says what actually happened.
 
+Shared mode alone was not enough, and the second outage showed why. gotd's own
+`session.FileStorage` writes with `os.WriteFile`: it truncates the file and then
+fills it, guarded by a mutex that only exists inside one process. Under shared
+mode that is exactly the wrong write: a second process reading while the first
+is mid-write gets a session that will not parse, gotd treats an unparseable
+session as no session, and asks Telegram for a **brand-new auth key**. Repeat
+that once per spawned process and the account is asking for hundreds of auth
+keys an hour; the datacenter stops answering `ReqPqMulti`, every handshake hangs,
+and the bot -- which speaks plain HTTPS -- is the only thing left working.
+
+So the session is stored through `sessionfile.go` instead: a write goes to a
+temporary file and is renamed into place, and both reads and writes take a
+kernel lock on a separate `<session>.session.rw` guard file (separate because a
+rename replaces the inode the whole-process lock is held on). A reader now sees
+either the old session or the new one, never half of one.
+
+## Connecting is not part of starting up
+
+The transport comes up first and the Telegram connection catches up behind it.
+
+Connecting inline is what turned one unreachable account into a dead namespace:
+the process did not answer `initialize` until Telegram answered it, MetaMCP gave
+up after three attempts and killed it, spawned another, and the namespace's
+`tools/list` -- which waits on every server in it -- never returned, so the
+healthy bot server was never listed either.
+
+- `serve` calls `StartConnect`, which returns immediately and connects in a
+  goroutine, retrying with backoff up to two minutes between attempts. An
+  outage heals by itself; nobody restarts anything.
+- One attempt is bounded (`connectTimeout`). gotd never gives up on its own --
+  a dead connection is restarted with backoff for as long as its context lives
+  -- so without a deadline a Telegram-side outage is an indefinite hang.
+- gotd's logger is wired into `slog`, so the datacenter, the transport error and
+  every reconnect reach stderr, which is where a supervisor collects them. The
+  last such error is also what a tool call answers with, instead of a bare
+  "timed out connecting to Telegram".
+- A tool that needs the connection before it is up says so and says why; `help`
+  and `config` keep working throughout.
+
 Bot mode has the same shape of conflict — Telegram allows one `getUpdates`
 consumer per token — and a 409 from a competing poller now comes back naming
 `TELEGRAM_CALLBACK_QUEUE_FILE`, which is how two readers can coexist.

@@ -44,3 +44,8 @@ func (l *sessionLock) release() {
 	_ = os.Remove(l.path)
 	l.file = nil
 }
+
+// withFileLock has nothing to lock with on a platform without flock, so it just
+// runs fn. The window it leaves open is the same one the sessionLock above
+// already accepts there.
+func withFileLock(_ string, _ bool, fn func() error) error { return fn() }

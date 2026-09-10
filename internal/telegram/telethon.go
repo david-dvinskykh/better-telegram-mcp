@@ -31,9 +31,17 @@ func (u *UserBackend) importTelethonSession(ctx context.Context) error {
 		return nil
 	}
 
-	storage := &session.FileStorage{Path: u.sessionPath}
-	if existing, err := storage.LoadSession(ctx); err == nil && len(existing) > 0 {
+	// Only an absent session is seeded. A read that fails for any other reason
+	// -- a permission change, a filesystem error -- must not be answered by
+	// overwriting the account that is sitting there: re-importing a key another
+	// server may still be using is how both ends lose the account.
+	storage := newSessionStorage(u.sessionPath)
+	existing, err := storage.LoadSession(ctx)
+	switch {
+	case err == nil && len(existing) > 0:
 		return nil
+	case err != nil && !errors.Is(err, session.ErrNotFound):
+		return fmt.Errorf("cannot read the session at %s: %w", u.sessionPath, err)
 	}
 
 	data, err := session.TelethonSession(strings.TrimSpace(u.sessionString))
@@ -63,7 +71,7 @@ func ImportTelethonSessionFile(ctx context.Context, sessionPath, sessionString s
 		return fmt.Errorf("that is not a Telethon session string: %w", err)
 	}
 
-	loader := session.Loader{Storage: &session.FileStorage{Path: sessionPath}}
+	loader := session.Loader{Storage: newSessionStorage(sessionPath)}
 	if err := loader.Save(ctx, data); err != nil {
 		return err
 	}

@@ -94,3 +94,28 @@ func readLockHolder(file *os.File) int {
 	}
 	return pid
 }
+
+// withFileLock runs fn while holding a kernel advisory lock on path, creating
+// the file if it is not there.
+//
+// It is a different file from the session itself on purpose: the session file
+// is replaced by a rename on every write, and a lock taken on the old inode
+// would guard nothing once the new one is in place.
+func withFileLock(path string, exclusive bool, fn func() error) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("cannot open the session write lock at %s: %w", path, err)
+	}
+	defer func() { _ = file.Close() }()
+
+	mode := syscall.LOCK_SH
+	if exclusive {
+		mode = syscall.LOCK_EX
+	}
+	if err := syscall.Flock(int(file.Fd()), mode); err != nil {
+		return fmt.Errorf("cannot take the session write lock at %s: %w", path, err)
+	}
+	defer func() { _ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN) }()
+
+	return fn()
+}

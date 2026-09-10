@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gotd/td/session"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
 	"github.com/gotd/td/telegram/downloader"
@@ -50,6 +49,11 @@ type UserBackend struct {
 	// Peer access hashes are cached per process; see peercache.go.
 	sweepState
 
+	// connLog carries gotd's view of the connection into this server's log and
+	// keeps the last transport error, which is the only account of a failure
+	// gotd gives: it restarts a dead connection instead of returning.
+	connLog *connectionLog
+
 	lock    *sessionLock
 	stop    context.CancelFunc
 	done    chan struct{}
@@ -66,6 +70,27 @@ type UserBackend struct {
 	// codeHash is the handle Telegram returns from SendCode and requires back
 	// on SignIn, so it has to survive between the two tool calls.
 	codeHash string
+}
+
+// connectTimeout bounds one attempt to bring the MTProto client up.
+//
+// gotd never gives up on its own: a connection that dies is restarted with
+// backoff for as long as its context lives, so without a deadline here a
+// Telegram-side outage is an indefinite hang rather than an error. It is short
+// enough that a supervisor waiting on this server gets an answer, and long
+// enough for a first sign-in, which generates an auth key over several round
+// trips.
+const connectTimeout = 25 * time.Second
+
+// connectTimeoutError says the client did not come up, and why, when gotd
+// managed to report a reason before the deadline.
+func connectTimeoutError(last error) error {
+	if last == nil {
+		return fmt.Errorf(
+			"timed out connecting to Telegram after %s and it never said why; "+
+				"the datacenter accepted the connection but did not answer", connectTimeout)
+	}
+	return fmt.Errorf("timed out connecting to Telegram after %s: %w", connectTimeout, last)
 }
 
 // UserOptions configures a user-mode backend.
@@ -127,10 +152,13 @@ func (u *UserBackend) Connect(ctx context.Context) error {
 		return err
 	}
 
+	connLog := &connectionLog{}
 	client := telegram.NewClient(u.apiID, u.apiHash, telegram.Options{
-		SessionStorage: &session.FileStorage{Path: u.sessionPath},
+		SessionStorage: newSessionStorage(u.sessionPath),
+		Logger:         connLog,
 	})
 	u.client = client
+	u.connLog = connLog
 
 	// Clear the reason the previous connection died before starting a new one,
 	// so a reconnect cannot report a stale cause.
@@ -171,10 +199,10 @@ func (u *UserBackend) Connect(ctx context.Context) error {
 			lock.release()
 			return fmt.Errorf("failed to connect to Telegram: %w", err)
 		}
-	case <-time.After(60 * time.Second):
+	case <-time.After(connectTimeout):
 		cancel()
 		lock.release()
-		return errors.New("timed out connecting to Telegram")
+		return connectTimeoutError(connLog.lastError())
 	case <-ctx.Done():
 		cancel()
 		lock.release()
@@ -276,6 +304,12 @@ func (u *UserBackend) ensure() (*tg.Client, error) {
 			"the Telegram connection is down (%v). If another better-telegram-mcp "+
 				"process is running against the same session, stop it or give this "+
 				"one its own TELEGRAM_SESSION_NAME", runErr)
+	}
+	if u.connLog != nil {
+		if last := u.connLog.lastError(); last != nil {
+			return nil, fmt.Errorf(
+				"Not connected to Telegram. The last connection attempt failed: %w", last)
+		}
 	}
 	return nil, errors.New(
 		"Not connected to Telegram. The server starts the connection at startup; " +

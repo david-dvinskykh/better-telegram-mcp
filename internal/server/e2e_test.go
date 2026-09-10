@@ -122,6 +122,11 @@ func TestBinaryServesMCPOverStdio(t *testing.T) {
 	}
 	defer session.Close()
 
+	// The connection is started alongside the transport rather than before it,
+	// so the handshake can land first. Wait for the server to report it is up
+	// before driving the tools that need it.
+	waitConnected(ctx, t, session)
+
 	if !telegram.sawCall("getMe") {
 		t.Error("the server should have verified the bot token at startup")
 	}
@@ -268,5 +273,105 @@ func TestBinaryExitsCleanlyWhenTheClientClosesThePipe(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "[better-telegram-mcp]") {
 		t.Errorf("a clean shutdown should not log an error: %s", stderr.String())
+	}
+}
+
+// waitConnected blocks until config(status) reports a live backend. The
+// connection comes up in the background now, so every test that drives a
+// Telegram tool has to wait for it rather than assume it happened before the
+// handshake returned.
+func waitConnected(ctx context.Context, t *testing.T, session *mcp.ClientSession) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{
+			Name:      "config",
+			Arguments: map[string]any{"action": "status"},
+		})
+		if err != nil {
+			t.Fatalf("config failed: %v", err)
+		}
+		var status map[string]any
+		if err := json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &status); err != nil {
+			t.Fatalf("status is not JSON: %v", err)
+		}
+		if status["connected"] == true {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the server never connected: %#v", status)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// A Telegram that accepts the connection and then says nothing is what took the
+// user-mode servers down, and it took the whole namespace with them: the server
+// connected before it served, so it never answered the MCP handshake, its
+// supervisor read that as a crash, and the healthy bot server in the same
+// namespace was never listed either. The transport must come up regardless.
+func TestBinaryServesMCPWhileTelegramIsSilent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a binary and spawns it")
+	}
+
+	release := make(chan struct{})
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": true, "result": map[string]any{"id": 1, "is_bot": true, "username": "slow_bot"},
+		})
+	}))
+	defer stub.Close()
+	defer close(release)
+
+	command := exec.Command(buildBinary(t))
+	command.Env = append(os.Environ(),
+		"TELEGRAM_BOT_TOKEN=123456:AAFakeTokenForTheStubServer0123456789",
+		"TELEGRAM_API_BASE="+stub.URL,
+		"TELEGRAM_DATA_DIR="+t.TempDir(),
+	)
+	var stderr strings.Builder
+	command.Stderr = &stderr
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	started := time.Now()
+	client := mcp.NewClient(&mcp.Implementation{Name: "e2e", Version: "1"}, nil)
+	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: command}, nil)
+	if err != nil {
+		t.Fatalf("the handshake waited on Telegram: %v\nstderr:\n%s", err, stderr.String())
+	}
+	defer session.Close()
+	if elapsed := time.Since(started); elapsed > 15*time.Second {
+		t.Errorf("the handshake took %s; it must not wait on Telegram", elapsed)
+	}
+
+	list, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("tools/list failed while Telegram was silent: %v", err)
+	}
+	if len(list.Tools) == 0 {
+		t.Error("no tools were published while Telegram was silent")
+	}
+
+	// A tool that needs the connection says so, instead of the process dying
+	// and taking every other server in the namespace with it.
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "message",
+		Arguments: map[string]any{"action": "send", "chat_id": 1, "text": "hi"},
+	})
+	if err != nil {
+		t.Fatalf("message failed outright: %v", err)
+	}
+	body := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(body, "connecting to Telegram") {
+		t.Errorf("expected the result to name the pending connection, got %s", body)
 	}
 }

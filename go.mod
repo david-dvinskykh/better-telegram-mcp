@@ -2,7 +2,13 @@ module github.com/david-dvinskykh/better-telegram-mcp
 
 go 1.26.0
 
-require github.com/gotd/td v0.161.0
+require (
+	github.com/gotd/log v0.1.0
+	github.com/gotd/td v0.161.0
+	github.com/modelcontextprotocol/go-sdk v1.7.0
+	golang.org/x/term v0.46.0
+	golang.org/x/text v0.42.0
+)
 
 require (
 	github.com/andybalholm/brotli v1.2.1 // indirect
@@ -19,12 +25,10 @@ require (
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gotd/ige v0.3.0 // indirect
-	github.com/gotd/log v0.1.0 // indirect
 	github.com/gotd/neo v0.1.5 // indirect
 	github.com/klauspost/compress v1.19.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
-	github.com/modelcontextprotocol/go-sdk v1.7.0 // indirect
 	github.com/ogen-go/ogen v1.23.0 // indirect
 	github.com/refraction-networking/utls v1.8.2 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
@@ -45,8 +49,6 @@ require (
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
-	golang.org/x/term v0.46.0 // indirect
-	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect

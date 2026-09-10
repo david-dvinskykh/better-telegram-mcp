@@ -91,7 +91,8 @@ Session persist: `~/.better-telegram-mcp/<name>.session`, permission 600.
 - `TELEGRAM_SESSION_LOCK` -- optional (Go server); `exclusive` (default) or
   `shared`. Shared lets the several processes MetaMCP spawns for one stdio
   server use a single MTProto session instead of all but the first exiting;
-  safe because they share a container and an IP.
+  safe because they share a container and an IP, and because the session file
+  is written atomically under its own `<session>.session.rw` lock (see GO.md).
 - `TELEGRAM_SESSION_STRING` -- optional (Go server); a Telethon session string
   of an account already signed in, which seeds an empty session file and is
   ignored afterwards. Moving one, not copying: Telegram invalidates an auth key

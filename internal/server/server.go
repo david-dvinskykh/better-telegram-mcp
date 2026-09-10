@@ -5,9 +5,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -35,6 +37,13 @@ type Server struct {
 	configured  bool
 	pendingAuth bool
 	runtime     map[string]int
+
+	// connecting and connErr describe the background connect: whether one is
+	// still in flight and what the last attempt failed with. A tool called
+	// before the backend is up answers from these instead of a bare "not
+	// connected".
+	connecting bool
+	connErr    error
 }
 
 // New resolves credentials and prepares the server. It does not connect yet:
@@ -98,6 +107,98 @@ func (s *Server) Connect(ctx context.Context) error {
 			"run `better-telegram-mcp auth --phone +<number>` to complete it")
 	}
 	return nil
+}
+
+// StartConnect brings the backend up in the background.
+//
+// The MCP handshake must not wait for Telegram. This server is spawned by a
+// supervisor that expects an initialize response in seconds, and MTProto can
+// take much longer than that -- or, during an outage, never answer at all.
+// Connecting inline is what turned one unreachable account into a server that
+// never spoke MCP, which its supervisor read as a crash, restarted, and
+// restarted again; every other Telegram tool in the same namespace went with
+// it. So the transport comes up first and the connection catches up, retrying
+// with backoff so an outage heals by itself.
+func (s *Server) StartConnect(ctx context.Context) {
+	if !s.settings.IsConfigured() {
+		slog.Warn("no Telegram credentials configured; " +
+			"help and config are available, other tools will show setup instructions")
+		return
+	}
+
+	s.mu.Lock()
+	s.connecting = true
+	s.mu.Unlock()
+
+	go s.connectLoop(ctx)
+}
+
+// connectRetryCap is the longest gap between attempts. Long enough not to add
+// to the load on a datacenter that is already refusing, short enough that a
+// recovered account is usable again without anyone restarting anything.
+const connectRetryCap = 2 * time.Minute
+
+func (s *Server) connectLoop(ctx context.Context) {
+	backoff := 2 * time.Second
+	for attempt := 1; ; attempt++ {
+		err := s.Connect(ctx)
+		if err == nil {
+			s.mu.Lock()
+			s.connecting = false
+			s.connErr = nil
+			s.mu.Unlock()
+			return
+		}
+
+		s.mu.Lock()
+		s.connErr = err
+		s.mu.Unlock()
+
+		// A session another process holds is not a transient failure: retrying
+		// would only keep the operator from seeing the one thing that fixes it.
+		var busy *telegram.SessionBusyError
+		if errors.As(err, &busy) || ctx.Err() != nil {
+			s.mu.Lock()
+			s.connecting = false
+			s.mu.Unlock()
+			slog.Error("giving up on the Telegram connection", "error", err)
+			return
+		}
+
+		slog.Warn("could not connect to Telegram; will retry",
+			"attempt", attempt, "retry_in", backoff, "error", err)
+		select {
+		case <-ctx.Done():
+			s.mu.Lock()
+			s.connecting = false
+			s.mu.Unlock()
+			return
+		case <-time.After(backoff):
+		}
+		if backoff *= 2; backoff > connectRetryCap {
+			backoff = connectRetryCap
+		}
+	}
+}
+
+// connectStatus describes an absent backend for a caller, or "" when the
+// backend's absence is not about the connection.
+func (s *Server) connectStatus() string {
+	s.mu.RLock()
+	connecting, connErr, configured := s.connecting, s.connErr, s.configured
+	s.mu.RUnlock()
+
+	switch {
+	case connErr != nil && connecting:
+		return fmt.Sprintf(
+			"Still connecting to Telegram. The last attempt failed: %v. "+
+				"The server keeps retrying, so try again in a moment.", connErr)
+	case connErr != nil:
+		return fmt.Sprintf("Not connected to Telegram: %v", connErr)
+	case connecting && configured:
+		return "Still connecting to Telegram; try again in a moment."
+	}
+	return ""
 }
 
 func (s *Server) newBackend() (telegram.Backend, error) {
@@ -220,7 +321,16 @@ func (s *Server) RefreshCredentials() error {
 // cannot.
 func (s *Server) ready() (telegram.Backend, tools.Result) {
 	backend := s.Backend()
-	if backend == nil || s.PendingAuth() {
+	if backend == nil {
+		// A configured server whose connection has not come up yet is a
+		// different situation from one nobody has set up, and saying so is the
+		// difference between "try again" and "go run auth".
+		if status := s.connectStatus(); status != "" {
+			return nil, tools.Err("%s", status)
+		}
+		return nil, tools.NotReady(s)
+	}
+	if s.PendingAuth() {
 		return nil, tools.NotReady(s)
 	}
 	return backend, nil

@@ -95,10 +95,9 @@ func serve() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := srv.Connect(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "[better-telegram-mcp] %v\n", err)
-		return 1
-	}
+	// The Telegram connection is started, not awaited: stdio has to be answering
+	// the MCP handshake within seconds whatever Telegram is doing.
+	srv.StartConnect(ctx)
 	defer srv.Close(context.WithoutCancel(ctx))
 
 	if err := srv.Run(ctx); err != nil && !isCleanShutdown(err) {

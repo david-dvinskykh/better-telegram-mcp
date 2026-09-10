@@ -36,6 +36,7 @@ type UserBackend struct {
 	sessionPath   string
 	sessionString string
 	sharedLock    bool
+	apiBase       string
 
 	client   *telegram.Client
 	api      *tg.Client
@@ -107,6 +108,9 @@ type UserOptions struct {
 	// of the second being refused. Safe only when they all reach Telegram from
 	// the same address.
 	SharedLock bool
+	// APIBase is the Bot API host, used only to ask Telegram what time it is
+	// before connecting. See clock.go for why that matters.
+	APIBase string
 }
 
 // NewUserBackend builds a user-mode backend. The session file is created on
@@ -118,6 +122,7 @@ func NewUserBackend(opts UserOptions) *UserBackend {
 		sessionPath:   opts.SessionPath,
 		sessionString: opts.SessionString,
 		sharedLock:    opts.SharedLock,
+		apiBase:       opts.APIBase,
 		aliases:       aliases.New(opts.AliasesPath),
 	}
 }
@@ -156,6 +161,9 @@ func (u *UserBackend) Connect(ctx context.Context) error {
 	client := telegram.NewClient(u.apiID, u.apiHash, telegram.Options{
 		SessionStorage: newSessionStorage(u.sessionPath),
 		Logger:         connLog,
+		// A host whose clock is off by more than half a minute cannot speak
+		// MTProto at all; see clock.go.
+		Clock: resolveClock(ctx, u.apiBase),
 	})
 	u.client = client
 	u.connLog = connLog

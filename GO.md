@@ -132,6 +132,28 @@ kernel lock on a separate `<session>.session.rw` guard file (separate because a
 rename replaces the inode the whole-process lock is held on). A reader now sees
 either the old session or the new one, never half of one.
 
+## The host clock is part of the protocol
+
+MTProto carries the clock in every message: an id is a timestamp, and each end
+drops an id too far from its own idea of now. gotd allows a server message at
+most 30 seconds into the future (`mtproto/read.go`), so a host running half a
+minute behind cannot read a single reply Telegram sends. The connection then
+restarts forever and nothing in the log names the clock.
+
+That is what took the user-mode servers down: the Raspberry Pi's NTP server had
+stopped answering, its clock had drifted ~35 seconds behind, and every account
+on that host failed identically while the bot -- which rides on HTTPS, tolerant
+of the same skew -- kept working.
+
+Telegram's own protocol says a client should take its time from the server
+rather than insist on its own, so `clock.go` does that before connecting: one
+HEAD request to the Bot API host, whose `Date` header is the same
+infrastructure the bot already uses, needing no NTP, no extra dependency and no
+open UDP port. A difference under five seconds is ignored; anything larger
+becomes an offset on the MTProto clock alone, logged with the measurement and a
+note to fix the host's time sync. Timers and tickers keep the system clock:
+they measure durations, which a wrong wall clock does not affect.
+
 ## Connecting is not part of starting up
 
 The transport comes up first and the Telegram connection catches up behind it.

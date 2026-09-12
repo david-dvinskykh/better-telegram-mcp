@@ -38,6 +38,16 @@ func (e *RPCError) Error() string {
 // A peer the client could not resolve is folded in here too: gotd raises its
 // own type for that, and to a caller it is the same problem.
 func AsRPCError(err error) (*RPCError, bool) {
+	// One this server already wrote, on its way back out through the tool
+	// layer. Without this case the layer fell through to its catch-all and
+	// replaced a finished, readable refusal with "Operation failed. Check
+	// server logs for details." -- the very sentence this type exists to
+	// avoid.
+	var already *RPCError
+	if errors.As(err, &already) {
+		return already, true
+	}
+
 	var notFound *peers.PeerNotFoundError
 	if errors.As(err, &notFound) {
 		return &RPCError{

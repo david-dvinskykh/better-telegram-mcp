@@ -113,3 +113,19 @@ func TestATelegramRefusalSurvivesResolution(t *testing.T) {
 		t.Errorf("Telegram's own refusal should reach the caller: %s", err.Error())
 	}
 }
+
+// The tool layer reports an error by type unless it recognises it, so a refusal
+// this package has already written has to survive the trip back out. It did
+// not: the live server answered an unknown id with "*telegram.RPCError:
+// Operation failed. Check server logs for details.", which is the sentence
+// RPCError exists to replace.
+func TestAFinishedRefusalIsRecognisedAgain(t *testing.T) {
+	built := unresolvedPeer(777000123456, errors.New("got empty user"))
+	again, ok := AsRPCError(built)
+	if !ok {
+		t.Fatal("a refusal this package wrote should be recognised on the way out")
+	}
+	if again.Error() != built.Error() {
+		t.Errorf("the message should be unchanged: %s", again.Error())
+	}
+}

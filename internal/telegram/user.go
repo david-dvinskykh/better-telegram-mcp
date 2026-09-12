@@ -271,6 +271,7 @@ func (u *UserBackend) ClearCache(context.Context) error {
 	if u.api != nil {
 		u.peers = peers.Options{}.Build(u.api)
 	}
+	u.forgetPeers()
 	return nil
 }
 
@@ -451,14 +452,27 @@ func (u *UserBackend) resolvePeer(ctx context.Context, chatID any) (tg.InputPeer
 
 // resolveNumeric turns a Bot-API-shaped id into an input peer. A first miss is
 // not final: the id may simply not be in this process's peer cache yet, so the
-// account's dialogs are swept in and the lookup retried once.
+// account's own peers are swept in and the lookup retried once.
 func (u *UserBackend) resolveNumeric(ctx context.Context, id int64) (tg.InputPeerClass, error) {
 	peer, err := u.lookupNumeric(ctx, id)
 	if err == nil {
 		return peer, nil
 	}
-	u.sweepPeers(ctx)
-	return u.lookupNumeric(ctx, id)
+	if known, ok := u.knownPeer(id); ok {
+		return known, nil
+	}
+	u.sweepPeers(ctx, id)
+	// The index is consulted before the manager because it answers without a
+	// request, and because it holds the hashes the manager cannot be given:
+	// the ones a folder carries for chats past the head of the chat list.
+	if known, ok := u.knownPeer(id); ok {
+		return known, nil
+	}
+	peer, retry := u.lookupNumeric(ctx, id)
+	if retry != nil {
+		return nil, unresolvedPeer(id, retry)
+	}
+	return peer, nil
 }
 
 func (u *UserBackend) lookupNumeric(ctx context.Context, id int64) (tg.InputPeerClass, error) {
@@ -755,7 +769,11 @@ func (u *UserBackend) GetChatInfo(ctx context.Context, chatID any) (Map, error) 
 		return nil, err
 	}
 
-	info := Map{"id": peer.ID()}
+	// The id is the Bot-API-shaped one every action here accepts, not the bare
+	// MTProto id: a caller reads it from this result and passes it straight
+	// back -- contact(action="alias_set") does exactly that -- and a group's
+	// bare id would come back as a user id and resolve to somebody else.
+	info := Map{"id": peerRef(peer.InputPeer())}
 	switch typed := peer.(type) {
 	case peers.User:
 		raw := typed.Raw()

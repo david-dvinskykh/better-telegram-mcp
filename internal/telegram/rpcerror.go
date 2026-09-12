@@ -55,6 +55,29 @@ func AsRPCError(err error) (*RPCError, bool) {
 	return &RPCError{Type: rpc.Type, Code: rpc.Code, Advice: rpcAdvice(rpc)}, true
 }
 
+// unresolvedPeer is what an id nothing on the account can name gets back.
+//
+// gotd reports a missing access hash in three shapes: Telegram's own
+// PEER_ID_INVALID, gotd's PeerNotFoundError, and -- when users.getUsers answers
+// userEmpty, which is what an unknown id gets -- a bare "got empty user" from
+// deep inside the library. Only the first two arrived with a readable message.
+// The third reached the caller as "Operation failed. Check server logs for
+// details.", which is how four chats in a folder became a mystery instead of a
+// one-line diagnosis.
+func unresolvedPeer(id int64, cause error) error {
+	if rpc, ok := AsRPCError(cause); ok {
+		return rpc
+	}
+	return &RPCError{
+		Type: "PEER_NOT_FOUND",
+		Code: 400,
+		Advice: fmt.Sprintf("This account has no access hash for %d, so it cannot address "+
+			"that chat: Telegram does not recognise the id, or the chat belongs to a "+
+			"different account. Get a current id from chat(action=\"list\"), or pass a "+
+			"@username or a saved alias.", id),
+	}
+}
+
 // rpcAdvice turns the failures a caller actually hits into a next step. Anything
 // unlisted still reaches them by name, which is enough to look up.
 func rpcAdvice(rpc *tgerr.Error) string {

@@ -203,7 +203,28 @@ func (u *UserBackend) dialogFilters(ctx context.Context) ([]*tg.DialogFilter, er
 			out = append(out, filter)
 		}
 	}
+	// Telegram answers with input peers, access hashes included, so reading the
+	// folders is also the cheapest way to learn how to address the chats in
+	// them -- including the ones too far down the chat list for a bounded walk
+	// of the dialogs to reach.
+	u.rememberFilterPeers(out)
 	return out, nil
+}
+
+// rememberFilterPeers indexes every chat the folders name, whichever list it
+// sits in. The ids GetFolder hands back come from exactly these peers, so a
+// caller that reads a folder and then reads one of its chats must not be told
+// the id does not exist.
+func (u *UserBackend) rememberFilterPeers(filters []*tg.DialogFilter) {
+	for _, filter := range filters {
+		for _, group := range [][]tg.InputPeerClass{
+			filter.PinnedPeers, filter.IncludePeers, filter.ExcludePeers,
+		} {
+			for _, peer := range group {
+				u.rememberPeerRef(peer)
+			}
+		}
+	}
 }
 
 func (u *UserBackend) findFolder(ctx context.Context, id int) (*tg.DialogFilter, error) {
